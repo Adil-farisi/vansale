@@ -372,29 +372,7 @@ class _UpdatecustomerState extends State<Updatecustomer> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Customer ID Display
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.credit_card, color: Colors.blue, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Customer ID: ${widget.customer.custid}',
-                        style: TextStyle(
-                          color: Colors.blue.shade800,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+
 
                 // Show loading for dropdowns
                 if (isLoadingDropdowns) ...[

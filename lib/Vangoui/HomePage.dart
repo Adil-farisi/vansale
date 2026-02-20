@@ -4,12 +4,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:van_go/Vangoui/invoice/InvoiceCustomerPage.dart';
 import 'package:van_go/Vangoui/receipt/ReceiptsMainPage.dart';
 import 'package:van_go/Vangoui/reports/ReportsMainPage.dart';
+import 'package:van_go/Vangoui/settings/ChangePasswordPage.dart';
 import 'package:van_go/Vangoui/stocks/BatchWiseStockPage.dart';
 import 'package:van_go/Vangoui/stocks/FinishedGoodsPage.dart';
 import 'package:van_go/Vangoui/stocks/StockMainPage.dart';
 import 'package:van_go/Vangoui/stocks/TradingItemsPage.dart';
 
-import '../settings/ChangePasswordPage.dart';
 import 'Login.dart';
 import 'InvoiceListPage.dart';
 import 'cheque/ChequesMainPage.dart';
@@ -122,7 +122,7 @@ class _HomePageState extends State<HomePage> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
+                decoration: BoxDecoration(borderRadius: BorderRadius.only(bottomLeft:Radius.circular(20),bottomRight: Radius.circular(20)),
                   gradient: LinearGradient(
                     colors: [Colors.blue.shade800, Colors.blue.shade600],
                   ),

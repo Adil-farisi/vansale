@@ -29,7 +29,7 @@ class PermissionService {
       // Construct URL
       String apiUrl = baseUrl.isNotEmpty
           ? "$baseUrl/vansales-permission.php"
-          : "http://192.168.20.103/gst-3-3-production/mobile-service/vansales/vansales-permission.php";
+          : "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/vansales-permission.php";
 
       print("===== PERMISSION API REQUEST =====");
       print("URL: $apiUrl");

@@ -26,7 +26,10 @@ class _CustomerPageContent extends StatefulWidget {
   State<_CustomerPageContent> createState() => _CustomerPageContentState();
 }
 
-class _CustomerPageContentState extends State<_CustomerPageContent> {
+class _CustomerPageContentState extends State<_CustomerPageContent> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // Keep state when navigating back
+
   List<CustomerModel> allCustomers = [];
   List<CustomerModel> displayedCustomers = [];
   Map<String, Map<String, dynamic>> customerOutstandingData = {};
@@ -42,6 +45,9 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
   late CustomerApiService customerApiService;
   final TextEditingController _searchController = TextEditingController();
+
+  // FIXED: Track current filter state
+  String? currentFilter; // 'active', 'inactive', 'outstanding', or null for all
 
   @override
   void initState() {
@@ -109,7 +115,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     }
 
     print('💰 DEBUG: Starting _fetchCustomerOutstanding');
-    print('💰 DEBUG: API URL: http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_customers.php');
+    print('💰 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php');
     print('💰 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     if (mounted) {
@@ -120,11 +126,13 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_customers.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
           "veh": veh,
+          "srch":"",
+          "page":""
         }),
       );
 
@@ -197,8 +205,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
       setState(() {
         isLoading = true;
         errorMessage = '';
-        searchQuery = '';
-        _searchController.clear();
+        // FIXED: Don't clear searchQuery when fetching
         allCustomers = [];
         displayedCustomers = [];
         customerOutstandingData = {};
@@ -271,7 +278,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
         // DEBUG: Print all customer IDs from main API
         print('📊 DEBUG: Main API returned ${customers.length} customers:');
         for (var customer in customers) {
-          print('📊 DEBUG: - ${customer.custid}: ${customer.custname}');
+          print('📊 DEBUG: - ${customer.custid}: ${customer.custname} - Status: ${customer.status}');
         }
 
         // DEBUG: Print all customer IDs from outstanding API
@@ -316,7 +323,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
               stateCode: '',
               creditDays: 0,
               opAcc: 'dr',
-              status: 'active',
+              status: 'active', // Default to active for missing customers
               balance: '0.00',
               slex: '',
               outstandingAmount: data['outstandingAmount'] ?? '0.00',
@@ -329,7 +336,10 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
         setState(() {
           allCustomers = updatedCustomers;
-          displayedCustomers = List.from(allCustomers);
+
+          // FIXED: Apply current filter or show all customers
+          _applyCurrentFilter();
+
           totalCustomers = allCustomers.length;
           print('✅ DEBUG: Total loaded customers: ${allCustomers.length}');
           print('✅ DEBUG: Displaying ${displayedCustomers.length} customers');
@@ -337,7 +347,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
           if (allCustomers.isNotEmpty) {
             for (var i = 0; i < min(5, allCustomers.length); i++) {
-              print('✅ DEBUG: Customer $i: ${allCustomers[i].custid} - ${allCustomers[i].custname} - ${allCustomers[i].outstandingAmount}');
+              print('✅ DEBUG: Customer $i: ${allCustomers[i].custid} - ${allCustomers[i].custname} - Status: ${allCustomers[i].status} - ${allCustomers[i].outstandingAmount}');
             }
           }
         });
@@ -372,10 +382,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
       searchQuery = query.trim().toLowerCase();
 
       if (searchQuery.isEmpty) {
-        displayedCustomers = List.from(allCustomers);
-        print('🔍 DEBUG: Search cleared, showing ${displayedCustomers.length} customers');
+        // FIXED: Apply current filter instead of showing all
+        _applyCurrentFilter();
+        print('🔍 DEBUG: Search cleared, applying current filter');
       } else {
-        displayedCustomers = allCustomers.where((customer) {
+        // Filter by search query first
+        List<CustomerModel> searchFiltered = allCustomers.where((customer) {
           return customer.custname.toLowerCase().contains(searchQuery) ||
               customer.custid.toLowerCase().contains(searchQuery) ||
               (customer.phone?.toLowerCase() ?? '').contains(searchQuery) ||
@@ -383,6 +395,18 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
               (customer.address?.toLowerCase() ?? '').contains(searchQuery) ||
               (customer.gst?.toLowerCase() ?? '').contains(searchQuery);
         }).toList();
+
+        // Then apply status filter if any
+        if (currentFilter == 'active') {
+          displayedCustomers = searchFiltered.where((c) => c.isActive).toList();
+        } else if (currentFilter == 'inactive') {
+          displayedCustomers = searchFiltered.where((c) => !c.isActive).toList();
+        } else if (currentFilter == 'outstanding') {
+          displayedCustomers = searchFiltered.where((c) => c.hasOutstanding).toList();
+        } else {
+          displayedCustomers = searchFiltered;
+        }
+
         print('🔍 DEBUG: Found ${displayedCustomers.length} customers matching "$searchQuery"');
       }
     });
@@ -395,11 +419,27 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     setState(() {
       searchQuery = '';
       _searchController.clear();
-      displayedCustomers = List.from(allCustomers);
+      // FIXED: Apply current filter instead of showing all
+      _applyCurrentFilter();
       FocusScope.of(context).unfocus();
     });
   }
 
+  // FIXED: New method to apply current filter
+  void _applyCurrentFilter() {
+    if (currentFilter == 'active') {
+      displayedCustomers = allCustomers.where((c) => c.isActive).toList();
+    } else if (currentFilter == 'inactive') {
+      displayedCustomers = allCustomers.where((c) => !c.isActive).toList();
+    } else if (currentFilter == 'outstanding') {
+      displayedCustomers = allCustomers.where((c) => c.hasOutstanding).toList();
+    } else {
+      displayedCustomers = List.from(allCustomers);
+    }
+    print('🔍 DEBUG: Applied filter "$currentFilter" - showing ${displayedCustomers.length} customers');
+  }
+
+  // FIXED: Updated to keep inactive customers visible
   void _toggleCustomerStatus(int index) async {
     final customer = displayedCustomers[index];
     final newStatus = !customer.isActive;
@@ -407,14 +447,21 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
     print('🔄 DEBUG: Toggling customer ${customer.custname} status to $statusText');
 
+    // Cancel any ongoing SnackBar operations
+    ScaffoldMessenger.of(context).clearSnackBars();
+
+    // Store references to SnackBars
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? checkingSnackbar;
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? loadingSnackbar;
+
     // First check if we can deactivate (if going to inactive)
     if (!newStatus) {
       // Show loading while checking status
-      final checkingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+      checkingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Row(
             children: [
-              SizedBox(
+              const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
@@ -422,12 +469,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
                   color: Colors.white,
                 ),
               ),
-              SizedBox(width: 15),
-              Text('Checking customer status...'),
+              const SizedBox(width: 15),
+              const Text('Checking customer status...'),
             ],
           ),
           backgroundColor: Colors.blue,
-          duration: Duration(seconds: 5),
+          duration: const Duration(seconds: 5),
         ),
       );
 
@@ -445,7 +492,19 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
           statusResult = await _checkCustomerStatusDirect(customer.custid);
         }
 
-        checkingSnackbar.close();
+        // Safely close the checking snackbar if it exists and is still showing
+        try {
+          if (checkingSnackbar != null && mounted) {
+            checkingSnackbar.close();
+          }
+        } catch (e) {
+          print('⚠️ DEBUG: Error closing checking snackbar: $e');
+        }
+
+        // Clear any snackbars that might be in an inconsistent state
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+        }
 
         print('🔍 DEBUG: Status check result: $statusResult');
 
@@ -463,39 +522,61 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
               .replaceAll('&#39;', "'");
 
           // Show error message from API
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                errorMessage.isNotEmpty
-                    ? errorMessage
-                    : 'Cannot deactivate customer. Has pending outstanding amount.',
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  errorMessage.isNotEmpty
+                      ? errorMessage
+                      : 'Cannot deactivate customer. Has pending outstanding amount.',
+                ),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
               ),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 4),
-            ),
-          );
+            );
+          }
           return;
         }
       } catch (e) {
-        checkingSnackbar.close();
+        // Safely close the checking snackbar if it exists
+        try {
+          if (checkingSnackbar != null && mounted) {
+            checkingSnackbar.close();
+          }
+        } catch (e) {
+          print('⚠️ DEBUG: Error closing checking snackbar: $e');
+        }
+
+        // Clear any snackbars that might be in an inconsistent state
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+        }
+
         print('❌ DEBUG: Error checking customer status: $e');
         // If status check fails, still allow the status change but show warning
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to verify customer status. Proceeding with caution.'),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to verify customer status. Proceeding with caution.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
       }
     }
 
+    // Clear any existing snackbars before showing loading
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
+
     // Show loading for status update
-    final loadingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
+    loadingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(
@@ -520,31 +601,65 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
         isActive: newStatus,
       );
 
-      loadingSnackbar.close();
+      // Safely close the loading snackbar if it exists
+      try {
+        if (loadingSnackbar != null && mounted) {
+          loadingSnackbar.close();
+        }
+      } catch (e) {
+        print('⚠️ DEBUG: Error closing loading snackbar: $e');
+      }
+
+      // Clear any snackbars that might be in an inconsistent state
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+      }
 
       print('📥 DEBUG: Update status result: $result');
 
       if (result['success'] == true) {
-        // Update in displayed list
-        setState(() {
-          displayedCustomers[index] = customer.copyWith(
-            status: statusText,
+        // FIXED: Update in place without removing from list
+        if (mounted) {
+          setState(() {
+            // Create updated customer with new status
+            final updatedCustomer = customer.copyWith(
+              status: statusText,
+            );
+
+            // Update in displayedCustomers (keep in list)
+            displayedCustomers[index] = updatedCustomer;
+
+            // Also update in allCustomers list
+            final allIndex = allCustomers.indexWhere((c) => c.custid == customer.custid);
+            if (allIndex != -1) {
+              allCustomers[allIndex] = updatedCustomer;
+            }
+
+            // FIXED: If we're on the active filter and we made a customer inactive,
+            // we should remove it from the displayed list if we're filtering by active
+            if (currentFilter == 'active' && !newStatus) {
+              displayedCustomers.removeAt(index);
+            }
+            // If we're on the inactive filter and we made a customer active,
+            // we should remove it from the displayed list if we're filtering by inactive
+            else if (currentFilter == 'inactive' && newStatus) {
+              displayedCustomers.removeAt(index);
+            }
+            // Otherwise, keep the customer in the list with updated status
+
+            print('✅ DEBUG: Customer status updated successfully');
+            print('✅ DEBUG: Total customers: ${allCustomers.length}');
+            print('✅ DEBUG: Displayed customers: ${displayedCustomers.length}');
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${customer.custname} is now ${newStatus ? 'Active' : 'Inactive'}'),
+              backgroundColor: newStatus ? Colors.green : Colors.orange,
+              duration: const Duration(seconds: 2),
+            ),
           );
-
-          // Also update in allCustomers list
-          final allIndex = allCustomers.indexWhere((c) => c.custid == customer.custid);
-          if (allIndex != -1) {
-            allCustomers[allIndex] = displayedCustomers[index];
-          }
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${customer.custname} is now ${newStatus ? 'Active' : 'Inactive'}'),
-            backgroundColor: newStatus ? Colors.green : Colors.orange,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        }
       } else {
         // Extract plain text from HTML message
         String errorMessage = result['message']?.toString() ?? 'Failed to update status';
@@ -556,36 +671,53 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
             .replaceAll('&quot;', '"')
             .replaceAll('&#39;', "'");
 
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // Safely close the loading snackbar if it exists
+      try {
+        if (loadingSnackbar != null && mounted) {
+          loadingSnackbar.close();
+        }
+      } catch (e) {
+        print('⚠️ DEBUG: Error closing loading snackbar: $e');
+      }
+
+      // Clear any snackbars that might be in an inconsistent state
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+      }
+
+      print('❌ DEBUG: Error updating customer status: $e');
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMessage),
+            content: Text('Error: $e'),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
-    } catch (e) {
-      loadingSnackbar.close();
-      print('❌ DEBUG: Error updating customer status: $e');
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
     }
   }
 
-// =================== DIRECT CUSTOMER STATUS CHECK ===================
+  // =================== DIRECT CUSTOMER STATUS CHECK ===================
   Future<Map<String, dynamic>> _checkCustomerStatusDirect(String custId) async {
     try {
       print('🔍 DEBUG: Direct check customer status for ID: $custId');
 
       // Make direct HTTP request
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/customers.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'unid': unid,
@@ -626,6 +758,8 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+
     print('🎨 DEBUG: Building CustomerPage');
     print('🎨 DEBUG: isLoadingSessionData: $isLoadingSessionData');
     print('🎨 DEBUG: isLoading: $isLoading');
@@ -634,6 +768,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     print('🎨 DEBUG: displayedCustomers length: ${displayedCustomers.length}');
     print('🎨 DEBUG: customerOutstandingData length: ${customerOutstandingData.length}');
     print('🎨 DEBUG: errorMessage: $errorMessage');
+    print('🎨 DEBUG: currentFilter: $currentFilter');
 
     final permissionProvider = Provider.of<PermissionProvider>(context);
 
@@ -964,12 +1099,10 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     if (!mounted) return;
 
     setState(() {
-      displayedCustomers = allCustomers
-          .where((customer) => customer.status.toLowerCase() == status.toLowerCase())
-          .toList();
+      currentFilter = status;
+      _applyCurrentFilter();
       searchQuery = '';
       _searchController.clear();
-      print('🔍 DEBUG: Filtered to ${displayedCustomers.length} customers');
     });
   }
 
@@ -978,18 +1111,10 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     if (!mounted) return;
 
     setState(() {
-      displayedCustomers = allCustomers
-          .where((customer) {
-        final outstanding = customer.outstandingAmount ?? '0.00';
-        // Check if amount is not zero (remove commas for parsing)
-        final amountStr = outstanding.replaceAll(RegExp(r'[^0-9.-]'), '');
-        final amount = double.tryParse(amountStr) ?? 0;
-        return amount != 0;
-      })
-          .toList();
+      currentFilter = 'outstanding';
+      _applyCurrentFilter();
       searchQuery = '';
       _searchController.clear();
-      print('💰 DEBUG: Filtered to ${displayedCustomers.length} customers with outstanding amounts');
     });
   }
 
@@ -998,10 +1123,10 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
     if (!mounted) return;
 
     setState(() {
-      displayedCustomers = List.from(allCustomers);
+      currentFilter = null;
+      _applyCurrentFilter();
       searchQuery = '';
       _searchController.clear();
-      print('🔍 DEBUG: Showing all ${displayedCustomers.length} customers');
     });
   }
 
@@ -1059,40 +1184,64 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
     if (displayedCustomers.isEmpty) {
       print('📱 DEBUG: Showing empty state');
+      String emptyMessage = 'No Customers Found';
+      if (searchQuery.isNotEmpty) {
+        emptyMessage = 'No customers found for "$searchQuery"';
+      } else if (currentFilter == 'active') {
+        emptyMessage = 'No active customers found';
+      } else if (currentFilter == 'inactive') {
+        emptyMessage = 'No inactive customers found';
+      } else if (currentFilter == 'outstanding') {
+        emptyMessage = 'No customers with outstanding amounts found';
+      }
+
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              searchQuery.isNotEmpty ? Icons.search_off : Icons.people_outline,
+              searchQuery.isNotEmpty || currentFilter != null
+                  ? Icons.search_off
+                  : Icons.people_outline,
               size: 80,
               color: Colors.grey.shade400,
             ),
             const SizedBox(height: 20),
             Text(
-              searchQuery.isNotEmpty
-                  ? 'No customers found for "$searchQuery"'
-                  : 'No Customers Found',
+              emptyMessage,
               style: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
-              searchQuery.isNotEmpty
-                  ? 'Try a different search term'
+              searchQuery.isNotEmpty || currentFilter != null
+                  ? 'Try a different search term or clear filters'
                   : 'Add your first customer to get started',
               style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: searchQuery.isNotEmpty ? _clearSearch : _fetchCustomers,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade800,
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-              ),
-              child: Text(
-                searchQuery.isNotEmpty ? 'Clear Search' : 'Refresh',
-                style: const TextStyle(fontSize: 16, color: Colors.white),
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (searchQuery.isNotEmpty || currentFilter != null)
+                  ElevatedButton(
+                    onPressed: _clearFilters,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    child: const Text('Clear Filters', style: TextStyle(color: Colors.white)),
+                  ),
+                if (searchQuery.isNotEmpty || currentFilter != null)
+                  const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: _fetchCustomers,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade800,
+                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                  ),
+                  child: const Text('Refresh', style: TextStyle(fontSize: 16, color: Colors.white)),
+                ),
+              ],
             ),
           ],
         ),
@@ -1267,8 +1416,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
                           ),
                         ),
 
-                        // Show customer ID
-                        _buildDetailItem(Icons.credit_card, "Customer ID", customer.custid),
+                        // Customer ID removed from here
                       ],
                     ),
                   ),
@@ -1288,7 +1436,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
 
                       const SizedBox(height: 8),
 
-                      // Edit Button
+                      // Edit Button - FIXED: Only enabled for active customers
                       _buildActionButton(
                         icon: Icons.edit,
                         color: isActive && permissionProvider.canEditCustomer()
@@ -1320,7 +1468,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
                             ),
                           );
                         },
-                        tooltip: 'Edit Customer',
+                        tooltip: isActive ? 'Edit Customer' : 'Cannot edit inactive customer',
                       ),
                     ],
                   ),
@@ -1410,7 +1558,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildDetailRow(Icons.credit_card, "Customer ID", customer.custid),
+              // Customer ID removed from dialog as well
               if (customer.phone.isNotEmpty)
                 _buildDetailRow(Icons.phone, "Phone", customer.phone),
               if (customer.email.isNotEmpty)
@@ -1499,6 +1647,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> {
           ),
         ),
         actions: [
+          // FIXED: Edit button only shown for active customers
           if (permissionProvider.canEditCustomer() && customer.isActive)
             ElevatedButton(
               onPressed: () {

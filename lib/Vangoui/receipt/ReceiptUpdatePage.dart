@@ -160,7 +160,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
 
   Future<void> _fetchCustomers() async {
     print('👥 DEBUG: Starting _fetchCustomers');
-    print('👥 DEBUG: API URL: http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_customers.php');
+    print('👥 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php');
     print('👥 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     setState(() {
@@ -169,7 +169,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_customers.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
@@ -286,7 +286,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
 
   Future<void> _fetchWallets() async {
     print('💰 DEBUG: Starting _fetchWallets');
-    print('💰 DEBUG: API URL: http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_wallets.php');
+    print('💰 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php');
     print('💰 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     setState(() {
@@ -295,7 +295,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_wallets.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
@@ -649,7 +649,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
         };
 
         print('💾 DEBUG: Sending receipt update data to API:');
-        print('💾 DEBUG: API URL: http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/receipt.php');
+        print('💾 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php');
         print('💾 DEBUG: Request body:');
         print(json.encode(requestData));
         print('💾 DEBUG: Formatted request body for debugging:');
@@ -659,7 +659,7 @@ class _ReceiptUpdatePageState extends State<ReceiptUpdatePage> {
 
         // Make API call
         final response = await http.post(
-          Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/receipt.php'),
+          Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode(requestData),
         );

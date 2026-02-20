@@ -25,11 +25,11 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
 
   // API URLs
   final String receiptsApiUrl =
-      "http://192.168.20.103/gst-3-3-production/mobile-service/vansales/receipts.php";
+      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/receipts.php";
   final String walletsApiUrl =
-      "http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_wallets.php";
+      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php";
   final String receiptActionApiUrl =
-      "http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/receipt.php";
+      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php";
 
   // Session variables
   String unid = '';

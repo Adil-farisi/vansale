@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-
-// Add this import for NewDiscountPage
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'EditDiscountPage.dart';
 import 'NewDiscountPage.dart';
 
@@ -13,126 +13,236 @@ class DiscountMainPage extends StatefulWidget {
 
 class _DiscountMainPageState extends State<DiscountMainPage> {
   List<Map<String, dynamic>> discounts = [];
+  List<Map<String, dynamic>> allDiscounts =
+      []; // Store all discounts for local filtering
   bool isLoading = false;
+  bool isDeleting = false; // Add delete loading state
+  String totalDiscounts = "0";
   final TextEditingController searchController = TextEditingController();
 
-  // Hardcoded sample data - Removed status field
-  final List<Map<String, dynamic>> sampleDiscounts = [
-    {
-      "id": "1",
-      "customerName": "John Smith",
-      "date": "15/03/2024",
-      "notes": "Loyal customer discount",
-      "discountAmount": "₹500",
-    },
-    {
-      "id": "2",
-      "customerName": "Rajesh Kumar",
-      "date": "20/03/2024",
-      "notes": "Bulk purchase discount",
-      "discountAmount": "₹1,200",
-    },
-    {
-      "id": "3",
-      "customerName": "Priya Sharma",
-      "date": "25/03/2024",
-      "notes": "Festival season discount",
-      "discountAmount": "₹750",
-    },
-    {
-      "id": "4",
-      "customerName": "Amit Patel",
-      "date": "28/03/2024",
-      "notes": "First purchase discount",
-      "discountAmount": "₹300",
-    },
-    {
-      "id": "5",
-      "customerName": "Sneha Verma",
-      "date": "01/04/2024",
-      "notes": "Referral bonus discount",
-      "discountAmount": "₹1,000",
-    },
-    {
-      "id": "6",
-      "customerName": "Rahul Mehta",
-      "date": "05/04/2024",
-      "notes": "Clearance sale discount",
-      "discountAmount": "₹2,500",
-    },
-    {
-      "id": "7",
-      "customerName": "Anjali Gupta",
-      "date": "10/04/2024",
-      "notes": "Seasonal discount",
-      "discountAmount": "₹600",
-    },
-    {
-      "id": "8",
-      "customerName": "Vikram Singh",
-      "date": "12/04/2024",
-      "notes": "Corporate discount",
-      "discountAmount": "₹1,800",
-    },
-  ];
+  // Add a flag to track if we're using local filtering
+  bool isSearching = false;
+
+  // API endpoints
+  final String apiUrl =
+      "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/discounts.php";
+  final String deleteApiUrl =
+      "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/discounts.php";
 
   @override
   void initState() {
     super.initState();
     print("🚀 DiscountMainPage initialized");
-    _loadDiscountsData();
+
+    // Add listener to search controller for real-time filtering
+    searchController.addListener(_onSearchChanged);
+
+    _fetchDiscountsFromApi();
   }
 
-  Future<void> _loadDiscountsData() async {
-    print("📋 Loading discounts data...");
+  @override
+  void dispose() {
+    searchController.removeListener(_onSearchChanged);
+    searchController.dispose();
+    super.dispose();
+  }
+
+  // Listen to search text changes
+  void _onSearchChanged() {
+    // If search text is empty, show all discounts
+    if (searchController.text.isEmpty) {
+      setState(() {
+        discounts = List.from(allDiscounts);
+        isSearching = false;
+      });
+    } else {
+      // If search text is not empty, filter locally
+      _filterDiscountsLocally();
+    }
+  }
+
+  // Filter discounts locally based on search text
+  void _filterDiscountsLocally() {
+    final query = searchController.text.toLowerCase().trim();
+
+    if (query.isEmpty) {
+      setState(() {
+        discounts = List.from(allDiscounts);
+        isSearching = false;
+      });
+      return;
+    }
+
+    setState(() {
+      isSearching = true;
+      discounts =
+          allDiscounts.where((discount) {
+            final customerName = (discount['customerName'] ?? '').toLowerCase();
+            final notes = (discount['notes'] ?? '').toLowerCase();
+
+            return customerName.contains(query) || notes.contains(query);
+          }).toList();
+    });
+
+    print("🔍 Local search: '$query' found ${discounts.length} results");
+  }
+
+  // Fetch discounts from API
+  Future<void> _fetchDiscountsFromApi() async {
+    print("📋 Fetching discounts from API...");
     setState(() {
       isLoading = true;
     });
 
-    // Simulate API loading delay
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      // Prepare request body as per API specification
+      Map<String, dynamic> requestBody = {
+        "unid": "20260117130317",
+        "veh": "MQ--",
+        "srch": "", // Always send empty search to API to get all discounts
+        "page": "1",
+      };
 
-    setState(() {
-      discounts = List.from(sampleDiscounts);
-      isLoading = false;
-    });
+      print("📤 Request body: $requestBody");
 
-    print("✅ Loaded ${discounts.length} discounts");
+      // Make API call
+      final response = await http
+          .post(
+            Uri.parse(apiUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(requestBody),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      print("📥 Response status: ${response.statusCode}");
+      print("📥 Response body: ${response.body}");
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+
+        if (responseData['result'] == "1") {
+          setState(() {
+            totalDiscounts = responseData['ttldiscounts'] ?? "0";
+
+            // Parse discountdet array with correct field names from API
+            if (responseData['discountdet'] != null &&
+                responseData['discountdet'] is List) {
+              allDiscounts = List<Map<String, dynamic>>.from(
+                (responseData['discountdet'] as List).map((item) {
+                  return {
+                    "id": item['dscid']?.toString() ?? '',
+                    "dscid": item['dscid']?.toString() ?? '',
+                    "custid": item['custid']?.toString() ?? '',
+                    "customerName": item['custname'] ?? 'Unknown',
+                    "date": item['dsc_date'] ?? '',
+                    "notes": item['notes'] ?? '',
+                    "discountAmount": "₹${item['dsc_amt'] ?? '0'}",
+                    "originalAmount": item['dsc_amt'] ?? '0',
+                  };
+                }).toList(),
+              );
+
+              // If there's existing search text, apply local filter
+              if (searchController.text.isNotEmpty) {
+                _filterDiscountsLocally();
+              } else {
+                discounts = List.from(allDiscounts);
+              }
+            } else {
+              allDiscounts = [];
+              discounts = [];
+            }
+
+            isLoading = false;
+          });
+
+          print("✅ Loaded ${allDiscounts.length} discounts from API");
+          print("📊 Total discounts from API: $totalDiscounts");
+          print("📊 Displaying ${discounts.length} discounts (filtered)");
+        } else {
+          // API returned error
+          setState(() {
+            allDiscounts = [];
+            discounts = [];
+            totalDiscounts = "0";
+            isLoading = false;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                responseData['message'] ?? 'Failed to load discounts',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Server error: ${response.statusCode}');
+      }
+    } catch (e) {
+      print("❌ Error fetching discounts: $e");
+
+      setState(() {
+        isLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error connecting to server: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  // Filter discounts based on search
+  // Filter discounts based on search - This getter is no longer needed but kept for compatibility
   List<Map<String, dynamic>> get filteredDiscounts {
-    if (searchController.text.isEmpty) {
-      return discounts;
-    }
-
-    final query = searchController.text.toLowerCase();
-    return discounts.where((discount) {
-      return discount['customerName'].toLowerCase().contains(query) ||
-          discount['notes'].toLowerCase().contains(query);
-    }).toList();
+    return discounts; // Return the already filtered list
   }
 
   // Calculate total discount amount
   String _calculateTotalDiscount() {
     double total = 0;
     for (var discount in discounts) {
-      final amountStr = discount['discountAmount']
-          .toString()
-          .replaceAll('₹', '')
-          .replaceAll(',', '');
+      // Use originalAmount for calculation (without ₹ symbol)
+      String amountStr = discount['originalAmount']?.toString() ?? '0';
+
+      // Handle if it's already with ₹ symbol
+      if (amountStr.contains('₹')) {
+        amountStr = amountStr.replaceAll('₹', '');
+      }
+      amountStr = amountStr.replaceAll(',', '');
+
       final amount = double.tryParse(amountStr) ?? 0;
       total += amount;
     }
-    return '₹${total.toStringAsFixed(2)}';
+    return '₹ ${total.toStringAsFixed(2)}';
   }
 
-  // Edit discount
-  // Edit discount - Updated to navigate to EditDiscountPage
+  // Search with API - Modified to use local filtering
+  void _performSearch() {
+    // Instead of calling API again, just filter locally
+    _filterDiscountsLocally();
+  }
+
+  // Edit discount - Navigate to EditDiscountPage
   void _editDiscount(Map<String, dynamic> discount) {
     print("✏️ Editing discount for: ${discount['customerName']}");
 
-    // Navigate to EditDiscountPage and wait for result
+    // DEBUG: Print all fields in the discount object
+    print("📦 Full discount data being passed to EditDiscountPage:");
+    discount.forEach((key, value) {
+      print("   - $key: $value (${value.runtimeType})");
+    });
+
+    // Specifically check if custid exists
+    if (discount.containsKey('custid')) {
+      print("✅ custid found: ${discount['custid']}");
+    } else {
+      print("❌ custid NOT found in discount object!");
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -141,14 +251,22 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
     ).then((updatedDiscount) {
       // Handle the updated discount data returned from EditDiscountPage
       if (updatedDiscount != null && updatedDiscount is Map<String, dynamic>) {
-        setState(() {
-          final index = discounts.indexWhere(
-                (c) => c['id'] == discount['id'],
-          );
-          if (index != -1) {
-            discounts[index] = updatedDiscount;
-          }
-        });
+        // Update in allDiscounts as well
+        final indexInAll = allDiscounts.indexWhere(
+          (c) => c['id'] == discount['id'],
+        );
+        if (indexInAll != -1) {
+          allDiscounts[indexInAll] = updatedDiscount;
+        }
+
+        // Refresh the displayed list based on current search
+        if (searchController.text.isNotEmpty) {
+          _filterDiscountsLocally();
+        } else {
+          setState(() {
+            discounts = List.from(allDiscounts);
+          });
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -156,190 +274,192 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
             backgroundColor: Colors.green,
           ),
         );
+
+        // Refresh data from API after update
+        _fetchDiscountsFromApi();
       }
     });
   }
 
-  // Delete discount
-  void _deleteDiscount(String discountId) {
-    print("🗑️ Deleting discount: $discountId");
+  // Delete discount - Updated with API integration
+  Future<void> _deleteDiscount(String discountId, String customerName) async {
+    print("🗑️ Deleting discount: $discountId for customer: $customerName");
 
-    showDialog(
+    final TextEditingController reasonController = TextEditingController();
+
+    // Show confirmation dialog with reason
+    final bool? confirmDelete = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Delete Discount"),
-        content: const Text("Are you sure you want to delete this discount?"),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                discounts.removeWhere((c) => c['id'] == discountId);
-              });
-
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Discount deleted successfully"),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Show edit dialog - Removed status dropdown
-  void _showEditDialog(Map<String, dynamic> discount) {
-    TextEditingController customerController = TextEditingController(
-      text: discount['customerName'],
-    );
-    TextEditingController dateController = TextEditingController(
-      text: discount['date'],
-    );
-    TextEditingController notesController = TextEditingController(
-      text: discount['notes'],
-    );
-    TextEditingController amountController = TextEditingController(
-      text: discount['discountAmount'].toString().replaceAll('₹', ''),
-    );
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Edit Discount"),
-          content: SingleChildScrollView(
-            child: Column(
+      builder:
+          (context) => AlertDialog(
+            title: const Text("Delete Discount"),
+            content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildEditField("Customer Name", customerController),
-                const SizedBox(height: 8),
-                _buildEditField("Date (DD/MM/YYYY)", dateController),
-                const SizedBox(height: 8),
-                _buildEditField("Notes", notesController, maxLines: 3),
-                const SizedBox(height: 8),
-                _buildEditField("Discount Amount", amountController, isAmount: true),
+                Text(
+                  "Are you sure you want to delete discount for '$customerName'?",
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: reasonController,
+                  decoration: const InputDecoration(
+                    labelText: 'Reason for deletion *',
+                    hintText: 'Enter reason for deleting this discount...',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.note),
+                  ),
+                  maxLines: 3,
+                  autofocus: true,
+                ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  final index = discounts.indexWhere(
-                        (c) => c['id'] == discount['id'],
-                  );
-                  if (index != -1) {
-                    discounts[index] = {
-                      ...discounts[index],
-                      'customerName': customerController.text,
-                      'date': dateController.text,
-                      'notes': notesController.text,
-                      'discountAmount': '₹${amountController.text}',
-                    };
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context, false);
+                },
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (reasonController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Please enter a reason for deletion"),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
                   }
-                });
+                  Navigator.pop(context, true);
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+    );
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Discount updated successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              },
-              child: const Text("Save"),
+    // If user confirmed deletion
+    if (confirmDelete == true) {
+      final deleteReason = reasonController.text.trim();
+
+      setState(() {
+        isDeleting = true;
+      });
+
+      try {
+        // Prepare delete request body
+        Map<String, dynamic> deleteRequestBody = {
+          "unid": "20260117130317",
+          "veh": "MQ--",
+          "action": "delete",
+          "dscid": discountId,
+          "reason": deleteReason,
+        };
+
+        print("📤 Sending delete request to API: $deleteApiUrl");
+        print("📤 Delete request body: $deleteRequestBody");
+
+        final response = await http
+            .post(
+              Uri.parse(deleteApiUrl),
+              headers: {'Content-Type': 'application/json'},
+              body: json.encode(deleteRequestBody),
+            )
+            .timeout(const Duration(seconds: 10));
+
+        print("📥 Delete response status: ${response.statusCode}");
+        print("📥 Delete response body: ${response.body}");
+
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> responseData = json.decode(response.body);
+
+          if (responseData['result'] == "1") {
+            print("✅ Discount deleted successfully from API");
+
+            // Remove from local lists
+            setState(() {
+              allDiscounts.removeWhere((c) => c['id'] == discountId);
+              discounts.removeWhere((c) => c['id'] == discountId);
+              isDeleting = false;
+            });
+
+            // Show success message
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  "Discount for '$customerName' deleted successfully",
+                ),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+
+            // Refresh data from API to ensure sync
+            _fetchDiscountsFromApi();
+          } else {
+            // API returned error
+            setState(() {
+              isDeleting = false;
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  responseData['message'] ?? 'Failed to delete discount',
+                ),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        } else {
+          setState(() {
+            isDeleting = false;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Server error: ${response.statusCode}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
             ),
-          ],
+          );
+        }
+      } catch (e) {
+        print("❌ Error deleting discount: $e");
+
+        setState(() {
+          isDeleting = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error connecting to server: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
         );
-      },
-    );
+      }
+    }
   }
 
-  Widget _buildEditField(
-      String label,
-      TextEditingController controller, {
-        bool isAmount = false,
-        int maxLines = 1,
-      }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 4),
-        TextField(
-          controller: controller,
-          maxLines: maxLines,
-          decoration: InputDecoration(
-            hintText: "Enter $label",
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Colors.grey.shade400),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 8,
-            ),
-            prefixText: isAmount ? '₹ ' : null,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Updated: Navigate to NewDiscountPage
-  // Updated: Navigate to NewDiscountPage
+  // Navigate to NewDiscountPage
   void _addNewDiscount() {
     print("➕ Navigating to NewDiscountPage");
 
-    // Navigate to NewDiscountPage and wait for result
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => NewDiscountPage(),
-      ),
+      MaterialPageRoute(builder: (context) => NewDiscountPage()),
     ).then((newDiscount) {
-      // Handle the new discount data returned from NewDiscountPage
       if (newDiscount != null && newDiscount is Map<String, dynamic>) {
-        setState(() {
-          // Generate a unique ID for the new discount
-          final newId = (discounts.length + 1).toString();
-
-          // Add the new discount to the beginning of the list
-          discounts.insert(0, {
-            "id": newId,
-            "customerName": newDiscount['customerName'] ?? 'New Customer',
-            "date": newDiscount['date'] ?? '01/01/2024',
-            "notes": newDiscount['notes'] ?? 'No notes',
-            "discountAmount": newDiscount['discountAmount'] ?? '₹0',
-          });
-        });
+        // Refresh data from API after adding
+        _fetchDiscountsFromApi();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -353,29 +473,30 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
 
   // Refresh data
   Future<void> _refreshData() async {
-    print("🔄 Refreshing discounts data");
-    setState(() {
-      isLoading = true;
-    });
+    print("🔄 Refreshing discounts data from API");
+    // Clear search when refreshing
+    searchController.clear();
+    await _fetchDiscountsFromApi();
+  }
 
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    setState(() {
-      discounts = List.from(sampleDiscounts);
-      isLoading = false;
-    });
+  // Clear search
+  void _clearSearch() {
+    searchController.clear();
+    // The listener will handle resetting the list
   }
 
   @override
   Widget build(BuildContext context) {
     print("🎨 Building DiscountMainPage UI...");
-    print("   Discounts count: ${discounts.length}");
-    print("   Filtered discounts: ${filteredDiscounts.length}");
+    print("   All discounts count: ${allDiscounts.length}");
+    print("   Displayed discounts: ${discounts.length}");
+    print("   Search text: '${searchController.text}'");
+    print("   Is searching: $isSearching");
 
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          "Discounts ",
+          "Discounts",
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
@@ -389,12 +510,37 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
           ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
-            onPressed: _addNewDiscount, // Now navigates to NewDiscountPage
+            onPressed: _addNewDiscount,
             tooltip: 'Add New Discount',
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+
+          // Global loading overlay for delete operation
+          if (isDeleting)
+            Container(
+              color: Colors.black.withOpacity(0.3),
+              child: const Center(
+                child: Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Deleting discount...'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -412,16 +558,12 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
       );
     }
 
-    if (discounts.isEmpty) {
+    if (allDiscounts.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.discount,
-              size: 80,
-              color: Colors.grey.shade300,
-            ),
+            Icon(Icons.discount, size: 80, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             const Text(
               'No Discounts Found',
@@ -461,6 +603,13 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                     decoration: InputDecoration(
                       hintText: "Search by customer or notes...",
                       prefixIcon: const Icon(Icons.search),
+                      suffixIcon:
+                          searchController.text.isNotEmpty
+                              ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: _clearSearch,
+                              )
+                              : null,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -469,16 +618,16 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                       ),
                     ),
                     onChanged: (value) {
-                      setState(() {});
+                      // The listener will handle filtering
+                    },
+                    onSubmitted: (value) {
+                      _performSearch();
                     },
                   ),
                 ),
                 const SizedBox(width: 10),
                 ElevatedButton.icon(
-                  onPressed: () {
-                    searchController.clear();
-                    setState(() {});
-                  },
+                  onPressed: _clearSearch,
                   icon: const Icon(Icons.refresh),
                   label: const Text("Clear"),
                   style: ElevatedButton.styleFrom(
@@ -490,6 +639,24 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
             ),
           ),
         ),
+
+        // Search result info
+        if (isSearching)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Text(
+                  'Found ${discounts.length} result${discounts.length != 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
 
         // Summary Cards
         Padding(
@@ -514,7 +681,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          discounts.length.toString(),
+                          allDiscounts.length.toString(),
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -566,9 +733,9 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            itemCount: filteredDiscounts.length,
+            itemCount: discounts.length,
             itemBuilder: (context, index) {
-              final discount = filteredDiscounts[index];
+              final discount = discounts[index];
               return _discountCard(discount);
             },
           ),
@@ -587,11 +754,10 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Row 1: Customer Name and Date in one row (without labels)
+            // Row 1: Customer Name and Date
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Customer Name (without label)
                 Expanded(
                   child: Text(
                     discount['customerName'],
@@ -603,8 +769,6 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-
-                // Date (without label)
                 Expanded(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
@@ -630,11 +794,10 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
 
             const SizedBox(height: 12),
 
-            // Row 2: Notes and Discount Amount in one row
+            // Row 2: Notes and Discount Amount
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Notes
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -649,18 +812,16 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        discount['notes'],
-                        style: const TextStyle(
-                          fontSize: 14,
-                        ),
+                        discount['notes']?.isNotEmpty == true
+                            ? discount['notes']
+                            : 'No notes',
+                        style: const TextStyle(fontSize: 14),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
-
-                // Discount Amount
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -694,9 +855,8 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // Edit Button
                 IconButton(
-                  onPressed: () => _editDiscount(discount),
+                  onPressed: isDeleting ? null : () => _editDiscount(discount),
                   icon: const Icon(Icons.edit, size: 18),
                   color: Colors.blue,
                   tooltip: 'Edit',
@@ -706,10 +866,14 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-
-                // Delete Button
                 IconButton(
-                  onPressed: () => _deleteDiscount(discount['id']),
+                  onPressed:
+                      isDeleting
+                          ? null
+                          : () => _deleteDiscount(
+                            discount['id'],
+                            discount['customerName'],
+                          ),
                   icon: const Icon(Icons.delete, size: 18),
                   color: Colors.red,
                   tooltip: 'Delete',

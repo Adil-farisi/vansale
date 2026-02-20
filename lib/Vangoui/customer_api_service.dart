@@ -5,7 +5,7 @@ import 'customer_model.dart';
 
 class CustomerApiService {
   static const String baseUrl =
-      'http://192.168.20.103/gst-3-3-production/mobile-service/vansales';
+      'http://192.168.1.108/gst-3-3-production/mobile-service/vansales';
 
   // Don't store unid and vehicle in constructor - fetch from SharedPreferences when needed
   CustomerApiService();
@@ -498,6 +498,8 @@ class CustomerApiService {
   }
 
   // =================== DELETE/DEACTIVATE CUSTOMER METHOD ===================
+  // =================== UPDATE CUSTOMER STATUS METHOD ===================
+  // =================== UPDATE CUSTOMER STATUS METHOD ===================
   Future<Map<String, dynamic>> updateCustomerStatus({
     required String custId,
     required bool isActive,
@@ -508,45 +510,74 @@ class CustomerApiService {
       final unid = sessionData['unid']!;
       final veh = sessionData['veh']!;
 
-      print('🔄 API DEBUG: Making status update request for customer: $custId');
+      print('🔄 API DEBUG: Making status update request for customer: $custId to ${isActive ? 'active' : 'inactive'}');
 
-      // Note: You need to check the exact API endpoint and parameters for status update
-      // This is a placeholder - adjust based on your actual API
+      // FIXED: Use correct action based on what your API expects
       final requestBody = {
         'unid': unid,
         'veh': veh,
-        'action': 'status', // Adjust based on your API
-        'cust': custId,
+        'action': 'updatestatus', // Try this action name
+        'custid': custId,
         'status': isActive ? 'active' : 'inactive',
       };
 
-      print(
-        '🔄 API DEBUG: Status update request body: ${json.encode(requestBody)}',
-      );
+      print('🔄 API DEBUG: Status update request body: ${json.encode(requestBody)}');
 
       final response = await http.post(
-        Uri.parse('$baseUrl/action/customers.php'), // Adjust endpoint if needed
+        Uri.parse('$baseUrl/action/customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(requestBody),
       );
 
-      print(
-        '🔄 API DEBUG: Status update response status code: ${response.statusCode}',
-      );
+      print('🔄 API DEBUG: Status update response status code: ${response.statusCode}');
       print('🔄 API DEBUG: Status update response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
         print('🔄 API DEBUG: Parsed status update response: $data');
 
-        return {
-          'success': data['result'] == '1',
-          'message':
-              data['message'] ??
-              (data['result'] == '1'
+        // Check if update was successful
+        if (data['result'] == '1') {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'Status updated successfully',
+          };
+        } else {
+          // Try alternative action name if first attempt failed
+          print('🔄 API DEBUG: First attempt failed, trying alternative action...');
+
+          // Try with 'customerstatus' action
+          final altRequestBody = {
+            'unid': unid,
+            'veh': veh,
+            'action': 'customerstatus',
+            'custid': custId,
+            'status': isActive ? 'active' : 'inactive',
+          };
+
+          final altResponse = await http.post(
+            Uri.parse('$baseUrl/action/customers.php'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(altRequestBody),
+          );
+
+          if (altResponse.statusCode == 200) {
+            final Map<String, dynamic> altData = json.decode(altResponse.body);
+            print('🔄 API DEBUG: Alternative response: $altData');
+
+            return {
+              'success': altData['result'] == '1',
+              'message': altData['message'] ?? (altData['result'] == '1'
                   ? 'Status updated successfully'
                   : 'Status update failed'),
-        };
+            };
+          }
+
+          return {
+            'success': false,
+            'message': data['message'] ?? 'Status update failed',
+          };
+        }
       } else {
         print('❌ API DEBUG: HTTP Error ${response.statusCode}');
         return {

@@ -24,7 +24,7 @@ class _SingleReceiptViewPageState extends State<SingleReceiptViewPage> {
   Map<String, dynamic>? customerDetails;
 
   // API URL
-  final String apiUrl = "http://192.168.20.103/gst-3-3-production/mobile-service/vansales/single-receipt-view.php";
+  final String apiUrl = "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/single-receipt-view.php";
 
   @override
   void initState() {

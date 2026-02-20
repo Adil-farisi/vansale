@@ -20,6 +20,9 @@ class _LoginState extends State<Login> {
   bool _obscure = true;
   bool _isLoading = false;
 
+  // FIXED: Hardcoded URL to match your other API calls
+  final String baseUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales";
+
   // Show permission loading overlay
   void _showPermissionLoading(BuildContext context) {
     showDialog(
@@ -60,10 +63,14 @@ class _LoginState extends State<Login> {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      String? baseUrl = prefs.getString("server_url");
+
+      // FIXED: Use hardcoded URL instead of fetching from SharedPreferences
+      String apiUrl = "$baseUrl/login.php";
+
+      // Get UNID from SharedPreferences (this should be set during registration)
       String? unid = prefs.getString("unid");
 
-      if (baseUrl == null || unid == null) {
+      if (unid == null || unid.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Registration data not found. Please register again."),
@@ -74,7 +81,6 @@ class _LoginState extends State<Login> {
         return;
       }
 
-      String apiUrl = "$baseUrl/login.php";
       final Map<String, String> body = {
         "user_name": usernameController.text.trim(),
         "password": passwordController.text.trim(),
@@ -90,6 +96,11 @@ class _LoginState extends State<Login> {
         Uri.parse(apiUrl),
         headers: {"Content-Type": "application/json"},
         body: json.encode(body),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw Exception("Connection timeout. Please check your network.");
+        },
       );
 
       print("===== LOGIN API RESPONSE =====");
@@ -108,18 +119,24 @@ class _LoginState extends State<Login> {
           await prefs.setString("username", usernameController.text.trim());
           await prefs.setString("veh", veh);
 
+          // Also save the base URL for other pages to use
+          await prefs.setString("server_url", baseUrl);
+
           print("===== LOGIN SUCCESS =====");
           print("Saved VEH: $veh");
+          print("Base URL: $baseUrl");
           print("=========================");
 
           // Show initial success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(data["message"] ?? "Login Successful"),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(data["message"] ?? "Login Successful"),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
 
           // ============ FETCH PERMISSIONS ============
           // Add a small delay to ensure login is fully processed
@@ -129,6 +146,9 @@ class _LoginState extends State<Login> {
 
           // IMPORTANT: Store context before async operations
           final currentContext = context;
+
+          // Check if widget is still mounted
+          if (!mounted) return;
 
           // Show loading dialog for permissions
           _showPermissionLoading(currentContext);
@@ -147,7 +167,11 @@ class _LoginState extends State<Login> {
             final permissionSuccess = await permissionProvider.fetchPermissions();
 
             // Hide loading dialog
-            Navigator.pop(currentContext);
+            if (Navigator.canPop(currentContext)) {
+              Navigator.pop(currentContext);
+            }
+
+            if (!mounted) return;
 
             if (permissionSuccess && permissionProvider.permissions != null) {
               print("===== PERMISSION FETCH SUCCESS =====");
@@ -180,6 +204,8 @@ class _LoginState extends State<Login> {
                 Navigator.pop(currentContext);
               }
 
+              if (!mounted) return;
+
               // Show warning but still allow navigation
               showDialog(
                 context: currentContext,
@@ -194,10 +220,12 @@ class _LoginState extends State<Login> {
                     TextButton(
                       onPressed: () {
                         Navigator.pop(context);
-                        Navigator.pushReplacement(
-                          currentContext,
-                          MaterialPageRoute(builder: (_) => HomeScreen()),
-                        );
+                        if (mounted) {
+                          Navigator.pushReplacement(
+                            currentContext,
+                            MaterialPageRoute(builder: (_) => HomeScreen()),
+                          );
+                        }
                       },
                       child: const Text("Continue Anyway"),
                     ),
@@ -205,6 +233,7 @@ class _LoginState extends State<Login> {
                       onPressed: () async {
                         Navigator.pop(context);
                         // Retry permission fetch
+                        if (!mounted) return;
                         _showPermissionLoading(currentContext);
                         try {
                           final permissionProvider = Provider.of<PermissionProvider>(
@@ -212,7 +241,12 @@ class _LoginState extends State<Login> {
                               listen: false
                           );
                           final retrySuccess = await permissionProvider.fetchPermissions();
-                          Navigator.pop(currentContext);
+
+                          if (Navigator.canPop(currentContext)) {
+                            Navigator.pop(currentContext);
+                          }
+
+                          if (!mounted) return;
 
                           if (retrySuccess) {
                             Navigator.pushReplacement(
@@ -221,11 +255,15 @@ class _LoginState extends State<Login> {
                             );
                           }
                         } catch (e) {
-                          Navigator.pop(currentContext);
-                          Navigator.pushReplacement(
-                            currentContext,
-                            MaterialPageRoute(builder: (_) => HomeScreen()),
-                          );
+                          if (Navigator.canPop(currentContext)) {
+                            Navigator.pop(currentContext);
+                          }
+                          if (mounted) {
+                            Navigator.pushReplacement(
+                              currentContext,
+                              MaterialPageRoute(builder: (_) => HomeScreen()),
+                            );
+                          }
                         }
                       },
                       child: const Text("Retry"),
@@ -238,12 +276,13 @@ class _LoginState extends State<Login> {
           } catch (permissionError) {
             print("===== PERMISSION FETCH ERROR =====");
             print("Error: $permissionError");
-            print("Stack Trace: ${permissionError.toString()}");
 
             // Hide loading dialog if still showing
             if (Navigator.canPop(currentContext)) {
               Navigator.pop(currentContext);
             }
+
+            if (!mounted) return;
 
             // Show error dialog but allow user to continue
             showDialog(
@@ -252,17 +291,19 @@ class _LoginState extends State<Login> {
               builder: (context) => AlertDialog(
                 title: const Text("Permission Error"),
                 content: Text(
-                  "Failed to load permissions: ${permissionError.toString()}\n\n"
+                  "Failed to load permissions: $permissionError\n\n"
                       "You can continue with limited functionality or retry.",
                 ),
                 actions: [
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      Navigator.pushReplacement(
-                        currentContext,
-                        MaterialPageRoute(builder: (_) => HomeScreen()),
-                      );
+                      if (mounted) {
+                        Navigator.pushReplacement(
+                          currentContext,
+                          MaterialPageRoute(builder: (_) => HomeScreen()),
+                        );
+                      }
                     },
                     child: const Text("Continue"),
                   ),
@@ -280,37 +321,46 @@ class _LoginState extends State<Login> {
           // ============ END OF PERMISSION FETCH ============
 
         } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(data["message"] ?? "Login Failed"),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(data["message"] ?? "Login Failed"),
+              content: Text("Server Error: ${response.statusCode}"),
               backgroundColor: Colors.red,
             ),
           );
         }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Server Error: ${response.statusCode}"),
-            backgroundColor: Colors.red,
-          ),
-        );
       }
     } catch (e) {
       print("===== LOGIN ERROR =====");
       print(e.toString());
       print("=======================");
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Error: $e"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Connection Error: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   InputDecoration textFieldStyle(String hint, {Widget? suffixIcon}) {
@@ -357,6 +407,7 @@ class _LoginState extends State<Login> {
                 const SizedBox(height: 40),
                 TextFormField(
                   controller: usernameController,
+                  keyboardType: TextInputType.phone,
                   decoration: textFieldStyle("Enter phone number"),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -419,7 +470,11 @@ class _LoginState extends State<Login> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 50),
+                const SizedBox(height: 20),
+
+                // Show current server URL for debugging
+
+
 
                 // Debug button for testing (remove in production)
                 if (const bool.fromEnvironment('DEBUG'))
@@ -434,7 +489,10 @@ class _LoginState extends State<Login> {
                           await permissionProvider.fetchPermissions();
                           print("Debug: Manually fetched permissions");
                         },
-                        child: const Text("Test Permission Fetch"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple,
+                        ),
+                        child: const Text("Test Permissions"),
                       ),
                     ],
                   ),

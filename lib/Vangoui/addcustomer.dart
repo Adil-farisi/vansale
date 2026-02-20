@@ -61,7 +61,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_customer_types.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customer_types.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -121,7 +121,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_sales_executives.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_sales_executives.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -195,7 +195,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/get_routes.php'),
+        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_routes.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -311,7 +311,7 @@ class _AddcustomerState extends State<Addcustomer> {
       };
 
       print('========== CUSTOMER INSERT API CALL ==========');
-      print('URL: http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/customers.php');
+      print('URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/customers.php');
       print('Request Body: ${json.encode(requestBody)}');
 
       // Make API call
