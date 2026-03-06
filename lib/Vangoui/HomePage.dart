@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:van_go/Vangoui/expenses/ExpenseVoucherMainPage.dart';
 import 'package:van_go/Vangoui/invoice/InvoiceCustomerPage.dart';
 import 'package:van_go/Vangoui/receipt/ReceiptsMainPage.dart';
 import 'package:van_go/Vangoui/reports/ReportsMainPage.dart';
@@ -122,7 +123,11 @@ class _HomePageState extends State<HomePage> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(borderRadius: BorderRadius.only(bottomLeft:Radius.circular(20),bottomRight: Radius.circular(20)),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(20),
+                    bottomRight: Radius.circular(20),
+                  ),
                   gradient: LinearGradient(
                     colors: [Colors.blue.shade800, Colors.blue.shade600],
                   ),
@@ -158,13 +163,18 @@ class _HomePageState extends State<HomePage> {
                     if (permissionProvider.permissions != null)
                       Container(
                         margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          permissionProvider.canCreateNewBill() ? 'Sales User' : 'Limited Access',
+                          permissionProvider.canCreateNewBill()
+                              ? 'Sales User'
+                              : 'Limited Access',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -204,20 +214,20 @@ class _HomePageState extends State<HomePage> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Theme(
-                          data: Theme.of(context)
-                              .copyWith(dividerColor: Colors.transparent),
+                          data: Theme.of(
+                            context,
+                          ).copyWith(dividerColor: Colors.transparent),
                           child: ExpansionTile(
                             key: ValueKey(expandedSection == "transactions"),
                             initiallyExpanded:
-                            expandedSection == "transactions",
+                                expandedSection == "transactions",
                             onExpansionChanged: (expanded) {
                               setState(() {
                                 expandedSection =
-                                expanded ? "transactions" : null;
+                                    expanded ? "transactions" : null;
                               });
                             },
-                            leading:
-                            const Icon(Icons.receipt_long_outlined),
+                            leading: const Icon(Icons.receipt_long_outlined),
                             title: const Text("Transactions"),
                             childrenPadding: const EdgeInsets.only(
                               left: 16,
@@ -241,7 +251,9 @@ class _HomePageState extends State<HomePage> {
                               ),
                               // ADDED CHEQUES OPTION
                               ListTile(
-                                leading: const Icon(Icons.account_balance_wallet),
+                                leading: const Icon(
+                                  Icons.account_balance_wallet,
+                                ),
                                 title: const Text("Cheques"),
                                 onTap: () async {
                                   Navigator.pop(context);
@@ -278,7 +290,8 @@ class _HomePageState extends State<HomePage> {
 
                     // ================= SALES =================
                     // Only show if user has any sales permissions
-                    if (permissionProvider.canCreateNewBill() || permissionProvider.canViewInvoice())
+                    if (permissionProvider.canCreateNewBill() ||
+                        permissionProvider.canViewInvoice())
                       const Padding(
                         padding: EdgeInsets.only(left: 4, bottom: 4),
                         child: Text(
@@ -290,14 +303,16 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
 
-                    if (permissionProvider.canCreateNewBill() || permissionProvider.canViewInvoice())
+                    if (permissionProvider.canCreateNewBill() ||
+                        permissionProvider.canViewInvoice())
                       Card(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Theme(
-                          data: Theme.of(context)
-                              .copyWith(dividerColor: Colors.transparent),
+                          data: Theme.of(
+                            context,
+                          ).copyWith(dividerColor: Colors.transparent),
                           child: ExpansionTile(
                             key: ValueKey(expandedSection == "sales"),
                             initiallyExpanded: expandedSection == "sales",
@@ -317,7 +332,9 @@ class _HomePageState extends State<HomePage> {
                               // Only show New Billing if user has permission
                               if (permissionProvider.canCreateNewBill())
                                 ListTile(
-                                  leading: const Icon(Icons.add_shopping_cart_outlined),
+                                  leading: const Icon(
+                                    Icons.add_shopping_cart_outlined,
+                                  ),
                                   title: const Text("New Billing"),
                                   onTap: () async {
                                     Navigator.pop(context);
@@ -334,7 +351,9 @@ class _HomePageState extends State<HomePage> {
                               // Only show Invoices if user has permission
                               if (permissionProvider.canViewInvoice())
                                 ListTile(
-                                  leading: const Icon(Icons.receipt_long_outlined),
+                                  leading: const Icon(
+                                    Icons.receipt_long_outlined,
+                                  ),
                                   title: const Text("Invoices"),
                                   onTap: () async {
                                     Navigator.pop(context);
@@ -347,7 +366,6 @@ class _HomePageState extends State<HomePage> {
                                     openDrawerCollapsed();
                                   },
                                 ),
-
                             ],
                           ),
                         ),
@@ -373,20 +391,18 @@ class _HomePageState extends State<HomePage> {
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
                         child: ExpansionTile(
                           key: ValueKey(expandedSection == "expense"),
-                          initiallyExpanded:
-                          expandedSection == "expense",
+                          initiallyExpanded: expandedSection == "expense",
                           onExpansionChanged: (expanded) {
                             setState(() {
-                              expandedSection =
-                              expanded ? "expense" : null;
+                              expandedSection = expanded ? "expense" : null;
                             });
                           },
-                          leading:
-                          const Icon(Icons.money_off_csred_outlined),
+                          leading: const Icon(Icons.money_off_csred_outlined),
                           title: const Text("Expense"),
                           childrenPadding: const EdgeInsets.only(
                             left: 16,
@@ -396,13 +412,14 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             ListTile(
                               leading: const Icon(Icons.add_circle_outline),
-                              title: const Text("New Voucher"),
+                              title: const Text("New expense"),
                               onTap: () async {
                                 Navigator.pop(context);
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => const NewVoucherPage(),
+                                    builder:
+                                        (_) => const ExpenseVoucherMainPage(),
                                   ),
                                 );
                                 openDrawerCollapsed();
@@ -428,8 +445,12 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
 
-                    const SizedBox(height: 15), // ADDED SPACING
 
+
+
+
+
+                    const SizedBox(height: 15), // ADDED SPACING
                     // ================= SETTINGS =================
                     // Settings section - Always show to all users
                     const Padding(
@@ -448,20 +469,18 @@ class _HomePageState extends State<HomePage> {
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
                         child: ExpansionTile(
                           key: ValueKey(expandedSection == "settings"),
-                          initiallyExpanded:
-                          expandedSection == "settings",
+                          initiallyExpanded: expandedSection == "settings",
                           onExpansionChanged: (expanded) {
                             setState(() {
-                              expandedSection =
-                              expanded ? "settings" : null;
+                              expandedSection = expanded ? "settings" : null;
                             });
                           },
-                          leading:
-                          const Icon(Icons.settings_outlined),
+                          leading: const Icon(Icons.settings_outlined),
                           title: const Text("Settings"),
                           childrenPadding: const EdgeInsets.only(
                             left: 16,
@@ -496,7 +515,8 @@ class _HomePageState extends State<HomePage> {
                     ),
 
                     // Show message if no permissions
-                    if (!permissionProvider.isLoaded && !permissionProvider.isLoading)
+                    if (!permissionProvider.isLoaded &&
+                        !permissionProvider.isLoading)
                       const Padding(
                         padding: EdgeInsets.all(16.0),
                         child: Center(
@@ -540,15 +560,12 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       const Text(
                         'Permissions:',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                       Text(
                         '${permissionProvider.canCreateNewBill() ? "Sales" : ""} '
-                            '${permissionProvider.canViewStock() ? "Stock" : ""} '
-                            '${!permissionProvider.canCreateNewBill() && !permissionProvider.canViewStock() ? "View Only" : ""}',
+                        '${permissionProvider.canViewStock() ? "Stock" : ""} '
+                        '${!permissionProvider.canCreateNewBill() && !permissionProvider.canViewStock() ? "View Only" : ""}',
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -560,60 +577,66 @@ class _HomePageState extends State<HomePage> {
 
               /// LOGOUT
               ListTile(
-                  leading: const Icon(Icons.logout, color: Colors.red),
-                  title: const Text(
-                    "Logout",
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.w600,
-                    ),
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  "Logout",
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.w600,
                   ),
-                  onTap: () async {
-                    bool confirm = await showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text("Logout"),
-                        content: const Text("Are you sure you want to logout?"),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text("Cancel"),
-                          ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
+                ),
+                onTap: () async {
+                  bool confirm =
+                      await showDialog(
+                        context: context,
+                        builder:
+                            (context) => AlertDialog(
+                              title: const Text("Logout"),
+                              content: const Text(
+                                "Are you sure you want to logout?",
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed:
+                                      () => Navigator.pop(context, false),
+                                  child: const Text("Cancel"),
+                                ),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text(
+                                    "Logout",
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ],
                             ),
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text(
-                              "Logout",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ) ?? false;
+                      ) ??
+                      false;
 
-                    if (confirm) {
-                      final prefs = await SharedPreferences.getInstance();
+                  if (confirm) {
+                    final prefs = await SharedPreferences.getInstance();
 
-                      // ✅ ONLY CLEAR LOGIN SESSION
-                      await prefs.setBool("isLoggedIn", false);
+                    // ✅ ONLY CLEAR LOGIN SESSION
+                    await prefs.setBool("isLoggedIn", false);
 
-                      // Clear permission cache on logout
-                      final permissionProvider = Provider.of<PermissionProvider>(
-                        context,
-                        listen: false,
-                      );
-                      permissionProvider.clearPermissions();
+                    // Clear permission cache on logout
+                    final permissionProvider = Provider.of<PermissionProvider>(
+                      context,
+                      listen: false,
+                    );
+                    permissionProvider.clearPermissions();
 
-                      // Navigate to Login page
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (_) => const Login()),
-                            (route) => false,
-                      );
-                    }
+                    // Navigate to Login page
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (_) => const Login()),
+                      (route) => false,
+                    );
                   }
+                },
               ),
 
               const SizedBox(height: 10),
@@ -623,12 +646,10 @@ class _HomePageState extends State<HomePage> {
       ),
 
       // =================== BODY ===================
-      body:
-      Padding(
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-
             // CUSTOMERS CARD - Only show if user has customer view permission
             if (permissionProvider.canViewCustomer())
               GestureDetector(
@@ -636,13 +657,14 @@ class _HomePageState extends State<HomePage> {
                   if (permissionProvider.canViewCustomer()) {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const CustomerPage()),
+                      MaterialPageRoute(builder: (_) => const CustomerPage()),
                     );
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('You do not have permission to view customers'),
+                        content: Text(
+                          'You do not have permission to view customers',
+                        ),
                         backgroundColor: Colors.red,
                       ),
                     );
@@ -658,14 +680,14 @@ class _HomePageState extends State<HomePage> {
                     width: double.infinity,
                     child: Row(
                       children: const [
-                        Icon(Icons.person,
-                            size: 40, color: Colors.blue),
+                        Icon(Icons.person, size: 40, color: Colors.blue),
                         SizedBox(width: 20),
                         Text(
                           "Customers",
                           style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -684,12 +706,15 @@ class _HomePageState extends State<HomePage> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => const ReportsMainPage()),
+                        builder: (_) => const ReportsMainPage(),
+                      ),
                     );
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('You do not have permission to view reports'),
+                        content: Text(
+                          'You do not have permission to view reports',
+                        ),
                         backgroundColor: Colors.red,
                       ),
                     );
@@ -705,14 +730,14 @@ class _HomePageState extends State<HomePage> {
                     width: double.infinity,
                     child: Row(
                       children: const [
-                        Icon(Icons.bar_chart,
-                            size: 40, color: Colors.green),
+                        Icon(Icons.bar_chart, size: 40, color: Colors.green),
                         SizedBox(width: 20),
                         Text(
                           "Reports",
                           style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -731,13 +756,14 @@ class _HomePageState extends State<HomePage> {
                     // Navigate to Stock Main Page (you'll need to create this)
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const StockMainPage()),
+                      MaterialPageRoute(builder: (_) => const StockMainPage()),
                     );
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('You do not have permission to view stock'),
+                        content: Text(
+                          'You do not have permission to view stock',
+                        ),
                         backgroundColor: Colors.red,
                       ),
                     );
@@ -753,14 +779,14 @@ class _HomePageState extends State<HomePage> {
                     width: double.infinity,
                     child: Row(
                       children: const [
-                        Icon(Icons.inventory,
-                            size: 40, color: Colors.orange),
+                        Icon(Icons.inventory, size: 40, color: Colors.orange),
                         SizedBox(width: 20),
                         Text(
                           "Stock",
                           style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -797,9 +823,7 @@ class _HomePageState extends State<HomePage> {
                             ? 'You can only create new bills'
                             : 'Contact administrator for access',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.grey,
-                        ),
+                        style: const TextStyle(color: Colors.grey),
                       ),
                       const SizedBox(height: 20),
                       if (permissionProvider.canCreateNewBill())
@@ -829,25 +853,23 @@ class _HomePageState extends State<HomePage> {
       ),
 
       // FLOATING ACTION BUTTON for New Billing (if user has permission)
-      floatingActionButton: permissionProvider.canCreateNewBill()
-          ? FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const NewBillingPage(),
-            ),
-          );
-        },
-        backgroundColor: Colors.blue.shade800,
-        icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
-        label: const Text(
-          'New Bill',
-          style: TextStyle(color: Colors.white),
-        ),
-      )
-          : null,
-
+      floatingActionButton:
+          permissionProvider.canCreateNewBill()
+              ? FloatingActionButton.extended(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NewBillingPage()),
+                  );
+                },
+                backgroundColor: Colors.blue.shade800,
+                icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
+                label: const Text(
+                  'New Bill',
+                  style: TextStyle(color: Colors.white),
+                ),
+              )
+              : null,
     );
   }
 }

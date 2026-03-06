@@ -11,11 +11,13 @@ import 'package:van_go/Vangoui/invoice/InvoiceCustomerPage.dart';
 import 'package:van_go/Vangoui/logosplashscreen.dart';
 import 'package:van_go/Vangoui/stocks/BatchWiseStockPage.dart';
 
+// Import the new screens
+
 // Import permission provider
 import 'package:van_go/Vangoui/permissions/permission_provider.dart';
 
-// Note: EditReceiptPage, ReceiptPreviewPage, and Updatecustomer are NOT included here
-// because they have required parameters in their constructors
+import 'Vangoui/financeyear/FinancialYearSelectionScreen.dart';
+import 'Vangoui/financeyear/MainWrapper.dart';
 
 void main() {
   runApp(const MyApp());
@@ -46,12 +48,13 @@ class MyApp extends StatelessWidget {
             elevation: 2,
           ),
         ),
+        // Change this from Logosplashscreen to MainWrapper
         home: const Logosplashscreen(),
 
-        // Named routes - ONLY for pages that have simple constructors (no required params)
+        // Named routes
         routes: {
           '/login': (context) => const Login(),
-          '/home': (context) => const HomeScreen(),
+          '/home': (context) => const HomeScreen(),  // This will now only be accessible after financial year selection
           '/register': (context) => const RegisterPage(),
           '/customer': (context) => const CustomerPage(),
           '/new-bill': (context) => const NewBillingPage(),
@@ -59,8 +62,9 @@ class MyApp extends StatelessWidget {
           '/stock': (context) => const BatchWiseStockPage(),
           '/invoice-customer': (context) => const InvoiceCustomerPage(),
           '/homepage': (context) => const HomePage(),
-          // DO NOT add EditReceiptPage, ReceiptPreviewPage, or Updatecustomer here
-          // because they require parameters
+
+          // Add new routes for financial year flow
+          '/financial-year-selection': (context) => const FinancialYearSelectionScreen(),
         },
       ),
     );

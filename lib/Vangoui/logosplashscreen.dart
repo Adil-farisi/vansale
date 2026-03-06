@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Login.dart';
+import 'financeyear/MainWrapper.dart';
 import 'homescreen.dart';
 import 'RegisterPage.dart';
 
@@ -36,15 +37,13 @@ class _LogosplashscreenState extends State<Logosplashscreen>
         MaterialPageRoute(builder: (_) => const RegisterPage()),
       );
     }
-
-    // 2️⃣ If registered AND logged in → Go to Home
+    // 2️⃣ If registered AND logged in → Go to MainWrapper (which handles financial year check)
     else if (isLoggedIn) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const MainWrapper()), // Changed to MainWrapper
       );
     }
-
     // 3️⃣ If registered BUT not logged in → Go to Login
     else {
       Navigator.pushReplacement(
@@ -137,6 +136,13 @@ class _LogosplashscreenState extends State<Logosplashscreen>
                   color: Colors.grey.shade600,
                   letterSpacing: 0.5,
                 ),
+              ),
+
+              const SizedBox(height: 40),
+
+              // Loading indicator
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
               ),
             ],
           ),

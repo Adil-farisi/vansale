@@ -4,7 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:van_go/Vangoui/permissions/permission_provider.dart';
+import 'financeyear/MainWrapper.dart';
 import 'homescreen.dart';
+// Import financial year service
+import 'financeyear/financial_year_service.dart'; // Add this import
 
 class Login extends StatefulWidget {
   const Login({super.key});
@@ -122,6 +125,14 @@ class _LoginState extends State<Login> {
           // Also save the base URL for other pages to use
           await prefs.setString("server_url", baseUrl);
 
+          // ============ NEW: SAVE CREDENTIALS FOR FINANCIAL YEAR API ============
+          await FinancialYearService.saveUserCredentials(unid, veh);
+          print("===== FINANCIAL YEAR CREDENTIALS SAVED =====");
+          print("UNID: $unid");
+          print("VEH: $veh");
+          print("============================================");
+          // ============ END OF FINANCIAL YEAR CREDENTIALS ============
+
           print("===== LOGIN SUCCESS =====");
           print("Saved VEH: $veh");
           print("Base URL: $baseUrl");
@@ -189,11 +200,12 @@ class _LoginState extends State<Login> {
                 ),
               );
 
-              // Navigate to home screen
+              // ============ CHANGED: Navigate to MainWrapper instead of HomeScreen ============
               Navigator.pushReplacement(
                 currentContext,
-                MaterialPageRoute(builder: (_) => HomeScreen()),
+                MaterialPageRoute(builder: (_) => const MainWrapper()),
               );
+              // ============ END OF CHANGE ============
 
             } else {
               print("===== PERMISSION FETCH FAILED =====");
@@ -221,10 +233,12 @@ class _LoginState extends State<Login> {
                       onPressed: () {
                         Navigator.pop(context);
                         if (mounted) {
+                          // ============ CHANGED: Navigate to MainWrapper ============
                           Navigator.pushReplacement(
                             currentContext,
-                            MaterialPageRoute(builder: (_) => HomeScreen()),
+                            MaterialPageRoute(builder: (_) => const MainWrapper()),
                           );
+                          // ============ END OF CHANGE ============
                         }
                       },
                       child: const Text("Continue Anyway"),
@@ -249,20 +263,24 @@ class _LoginState extends State<Login> {
                           if (!mounted) return;
 
                           if (retrySuccess) {
+                            // ============ CHANGED: Navigate to MainWrapper ============
                             Navigator.pushReplacement(
                               currentContext,
-                              MaterialPageRoute(builder: (_) => HomeScreen()),
+                              MaterialPageRoute(builder: (_) => const MainWrapper()),
                             );
+                            // ============ END OF CHANGE ============
                           }
                         } catch (e) {
                           if (Navigator.canPop(currentContext)) {
                             Navigator.pop(currentContext);
                           }
                           if (mounted) {
+                            // ============ CHANGED: Navigate to MainWrapper ============
                             Navigator.pushReplacement(
                               currentContext,
-                              MaterialPageRoute(builder: (_) => HomeScreen()),
+                              MaterialPageRoute(builder: (_) => const MainWrapper()),
                             );
+                            // ============ END OF CHANGE ============
                           }
                         }
                       },
@@ -299,10 +317,12 @@ class _LoginState extends State<Login> {
                     onPressed: () {
                       Navigator.pop(context);
                       if (mounted) {
+                        // ============ CHANGED: Navigate to MainWrapper ============
                         Navigator.pushReplacement(
                           currentContext,
-                          MaterialPageRoute(builder: (_) => HomeScreen()),
+                          MaterialPageRoute(builder: (_) => const MainWrapper()),
                         );
+                        // ============ END OF CHANGE ============
                       }
                     },
                     child: const Text("Continue"),
@@ -471,10 +491,6 @@ class _LoginState extends State<Login> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Show current server URL for debugging
-
-
 
                 // Debug button for testing (remove in production)
                 if (const bool.fromEnvironment('DEBUG'))
