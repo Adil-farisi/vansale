@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'EditDiscountPage.dart';
@@ -12,95 +13,87 @@ class DiscountMainPage extends StatefulWidget {
 }
 
 class _DiscountMainPageState extends State<DiscountMainPage> {
-  List<Map<String, dynamic>> discounts = [];
-  List<Map<String, dynamic>> allDiscounts =
-      []; // Store all discounts for local filtering
+  List<Map<String, dynamic>> allDiscounts = [];
+  List<Map<String, dynamic>> displayedDiscounts = [];
   bool isLoading = false;
-  bool isDeleting = false; // Add delete loading state
+  bool isLoadingMore = false;
+  bool isDeleting = false;
   String totalDiscounts = "0";
   final TextEditingController searchController = TextEditingController();
 
-  // Add a flag to track if we're using local filtering
-  bool isSearching = false;
+  // Pagination variables
+  int currentPage = 1;
+  int totalPages = 1;
+  int totalDiscountsCount = 0;
+  bool hasMorePages = false;
+  String searchQuery = '';
+
+  // Debounce timer for search
+  Timer? _debounceTimer;
+
+  // Scroll controller for pagination
+  final ScrollController _scrollController = ScrollController();
 
   // API endpoints
   final String apiUrl =
-      "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/discounts.php";
+      "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/discounts.php";
   final String deleteApiUrl =
-      "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/discounts.php";
+      "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/discounts.php";
 
   @override
   void initState() {
     super.initState();
     print("🚀 DiscountMainPage initialized");
 
-    // Add listener to search controller for real-time filtering
-    searchController.addListener(_onSearchChanged);
+    // Add scroll listener for pagination
+    _scrollController.addListener(_onScroll);
 
-    _fetchDiscountsFromApi();
+    _fetchDiscountsFromApi(resetPagination: true);
   }
 
   @override
   void dispose() {
-    searchController.removeListener(_onSearchChanged);
     searchController.dispose();
+    _debounceTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  // Listen to search text changes
-  void _onSearchChanged() {
-    // If search text is empty, show all discounts
-    if (searchController.text.isEmpty) {
-      setState(() {
-        discounts = List.from(allDiscounts);
-        isSearching = false;
-      });
-    } else {
-      // If search text is not empty, filter locally
-      _filterDiscountsLocally();
-    }
-  }
-
-  // Filter discounts locally based on search text
-  void _filterDiscountsLocally() {
-    final query = searchController.text.toLowerCase().trim();
-
-    if (query.isEmpty) {
-      setState(() {
-        discounts = List.from(allDiscounts);
-        isSearching = false;
-      });
-      return;
-    }
-
-    setState(() {
-      isSearching = true;
-      discounts =
-          allDiscounts.where((discount) {
-            final customerName = (discount['customerName'] ?? '').toLowerCase();
-            final notes = (discount['notes'] ?? '').toLowerCase();
-
-            return customerName.contains(query) || notes.contains(query);
-          }).toList();
+  // Scroll listener for pagination
+  void _onScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients &&
+          _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+        // User scrolled near the bottom, load more data
+        if (!isLoadingMore && hasMorePages && !isLoading) {
+          _loadMoreDiscounts();
+        }
+      }
     });
-
-    print("🔍 Local search: '$query' found ${discounts.length} results");
   }
 
-  // Fetch discounts from API
-  Future<void> _fetchDiscountsFromApi() async {
+  // =================== FETCH DISCOUNTS WITH SEARCH AND PAGINATION ===================
+  Future<void> _fetchDiscountsFromApi({bool resetPagination = true}) async {
     print("📋 Fetching discounts from API...");
-    setState(() {
-      isLoading = true;
-    });
+    print("📝 Search query: '$searchQuery'");
+    print("📄 Page: $currentPage");
+    print("🔄 Reset pagination: $resetPagination");
+
+    if (resetPagination) {
+      setState(() {
+        isLoading = true;
+        currentPage = 1;
+        allDiscounts = [];
+      });
+    }
 
     try {
-      // Prepare request body as per API specification
+      // Prepare request body with search and page
       Map<String, dynamic> requestBody = {
         "unid": "20260117130317",
         "veh": "MQ--",
-        "srch": "", // Always send empty search to API to get all discounts
-        "page": "1",
+        "srch": searchQuery,
+        "page": currentPage.toString(),
       };
 
       print("📤 Request body: $requestBody");
@@ -108,10 +101,10 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
       // Make API call
       final response = await http
           .post(
-            Uri.parse(apiUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode(requestBody),
-          )
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      )
           .timeout(const Duration(seconds: 10));
 
       print("📥 Response status: ${response.statusCode}");
@@ -121,51 +114,68 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         final Map<String, dynamic> responseData = json.decode(response.body);
 
         if (responseData['result'] == "1") {
+          // Parse discountdet array
+          List<Map<String, dynamic>> newDiscounts = [];
+          if (responseData['discountdet'] != null &&
+              responseData['discountdet'] is List) {
+            newDiscounts = List<Map<String, dynamic>>.from(
+              (responseData['discountdet'] as List).map((item) {
+                return {
+                  "id": item['dscid']?.toString() ?? '',
+                  "dscid": item['dscid']?.toString() ?? '',
+                  "custid": item['custid']?.toString() ?? '',
+                  "customerName": item['custname'] ?? 'Unknown',
+                  "date": item['dsc_date'] ?? '',
+                  "notes": item['notes'] ?? '',
+                  "discountAmount": "₹${item['dsc_amt'] ?? '0'}",
+                  "originalAmount": item['dsc_amt'] ?? '0',
+                };
+              }).toList(),
+            );
+          }
+
+          // Calculate pagination
+          int totalDiscountsFromApi = int.tryParse(responseData['ttldiscounts']?.toString() ?? '0') ?? 0;
+          int itemsPerPage = newDiscounts.length > 0 ? newDiscounts.length : 1;
+          int totalPagesFromApi = itemsPerPage > 0 ? (totalDiscountsFromApi / itemsPerPage).ceil() : 1;
+          bool hasMoreFromApi = currentPage < totalPagesFromApi;
+
+          print("📊 Pagination calculated:");
+          print("   - totalDiscounts: $totalDiscountsFromApi");
+          print("   - itemsPerPage: $itemsPerPage");
+          print("   - totalPages: $totalPagesFromApi");
+          print("   - currentPage: $currentPage");
+          print("   - hasMore: $hasMoreFromApi");
+
           setState(() {
-            totalDiscounts = responseData['ttldiscounts'] ?? "0";
-
-            // Parse discountdet array with correct field names from API
-            if (responseData['discountdet'] != null &&
-                responseData['discountdet'] is List) {
-              allDiscounts = List<Map<String, dynamic>>.from(
-                (responseData['discountdet'] as List).map((item) {
-                  return {
-                    "id": item['dscid']?.toString() ?? '',
-                    "dscid": item['dscid']?.toString() ?? '',
-                    "custid": item['custid']?.toString() ?? '',
-                    "customerName": item['custname'] ?? 'Unknown',
-                    "date": item['dsc_date'] ?? '',
-                    "notes": item['notes'] ?? '',
-                    "discountAmount": "₹${item['dsc_amt'] ?? '0'}",
-                    "originalAmount": item['dsc_amt'] ?? '0',
-                  };
-                }).toList(),
-              );
-
-              // If there's existing search text, apply local filter
-              if (searchController.text.isNotEmpty) {
-                _filterDiscountsLocally();
-              } else {
-                discounts = List.from(allDiscounts);
-              }
+            if (resetPagination) {
+              allDiscounts = newDiscounts;
             } else {
-              allDiscounts = [];
-              discounts = [];
+              allDiscounts.addAll(newDiscounts);
             }
 
+            displayedDiscounts = List.from(allDiscounts);
+
+            totalDiscountsCount = totalDiscountsFromApi;
+            totalDiscounts = totalDiscountsCount.toString();
+            totalPages = totalPagesFromApi;
+            hasMorePages = hasMoreFromApi;
+
             isLoading = false;
+            isLoadingMore = false;
           });
 
           print("✅ Loaded ${allDiscounts.length} discounts from API");
-          print("📊 Total discounts from API: $totalDiscounts");
-          print("📊 Displaying ${discounts.length} discounts (filtered)");
+          print("📊 Total discounts from API: $totalDiscountsCount");
+          print("📊 Displaying ${displayedDiscounts.length} discounts");
         } else {
           // API returned error
           setState(() {
             allDiscounts = [];
-            discounts = [];
+            displayedDiscounts = [];
             totalDiscounts = "0";
             isLoading = false;
+            isLoadingMore = false;
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -185,6 +195,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
 
       setState(() {
         isLoading = false;
+        isLoadingMore = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -196,19 +207,63 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
     }
   }
 
-  // Filter discounts based on search - This getter is no longer needed but kept for compatibility
-  List<Map<String, dynamic>> get filteredDiscounts {
-    return discounts; // Return the already filtered list
+  // Load more discounts for pagination
+  Future<void> _loadMoreDiscounts() async {
+    if (isLoadingMore || !hasMorePages) {
+      print('📄 Cannot load more - isLoadingMore: $isLoadingMore, hasMorePages: $hasMorePages');
+      return;
+    }
+
+    print('📄 Loading more discounts - Page ${currentPage + 1} of $totalPages');
+
+    setState(() {
+      isLoadingMore = true;
+    });
+
+    currentPage++;
+    await _fetchDiscountsFromApi(resetPagination: false);
+  }
+
+  // =================== SEARCH FUNCTIONALITY ===================
+  void _searchDiscounts(String query) {
+    print('🔍 Searching for: $query');
+
+    setState(() {
+      searchQuery = query;
+    });
+
+    _debounceSearch();
+  }
+
+  void _debounceSearch() {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
+
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _fetchDiscountsFromApi(resetPagination: true);
+    });
+  }
+
+  void _clearSearch() {
+    print("🧹 Clearing search");
+    _debounceTimer?.cancel();
+
+    setState(() {
+      searchQuery = '';
+      searchController.clear();
+    });
+
+    _fetchDiscountsFromApi(resetPagination: true);
+    FocusScope.of(context).unfocus();
   }
 
   // Calculate total discount amount
   String _calculateTotalDiscount() {
     double total = 0;
-    for (var discount in discounts) {
-      // Use originalAmount for calculation (without ₹ symbol)
+    for (var discount in displayedDiscounts) {
       String amountStr = discount['originalAmount']?.toString() ?? '0';
 
-      // Handle if it's already with ₹ symbol
       if (amountStr.contains('₹')) {
         amountStr = amountStr.replaceAll('₹', '');
       }
@@ -220,28 +275,9 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
     return '₹ ${total.toStringAsFixed(2)}';
   }
 
-  // Search with API - Modified to use local filtering
-  void _performSearch() {
-    // Instead of calling API again, just filter locally
-    _filterDiscountsLocally();
-  }
-
   // Edit discount - Navigate to EditDiscountPage
   void _editDiscount(Map<String, dynamic> discount) {
     print("✏️ Editing discount for: ${discount['customerName']}");
-
-    // DEBUG: Print all fields in the discount object
-    print("📦 Full discount data being passed to EditDiscountPage:");
-    discount.forEach((key, value) {
-      print("   - $key: $value (${value.runtimeType})");
-    });
-
-    // Specifically check if custid exists
-    if (discount.containsKey('custid')) {
-      print("✅ custid found: ${discount['custid']}");
-    } else {
-      print("❌ custid NOT found in discount object!");
-    }
 
     Navigator.push(
       context,
@@ -249,24 +285,17 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         builder: (context) => EditDiscountPage(discount: discount),
       ),
     ).then((updatedDiscount) {
-      // Handle the updated discount data returned from EditDiscountPage
       if (updatedDiscount != null && updatedDiscount is Map<String, dynamic>) {
-        // Update in allDiscounts as well
         final indexInAll = allDiscounts.indexWhere(
-          (c) => c['id'] == discount['id'],
+              (c) => c['id'] == discount['id'],
         );
         if (indexInAll != -1) {
           allDiscounts[indexInAll] = updatedDiscount;
         }
 
-        // Refresh the displayed list based on current search
-        if (searchController.text.isNotEmpty) {
-          _filterDiscountsLocally();
-        } else {
-          setState(() {
-            discounts = List.from(allDiscounts);
-          });
-        }
+        setState(() {
+          displayedDiscounts = List.from(allDiscounts);
+        });
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -275,8 +304,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
           ),
         );
 
-        // Refresh data from API after update
-        _fetchDiscountsFromApi();
+        _fetchDiscountsFromApi(resetPagination: true);
       }
     });
   }
@@ -287,64 +315,62 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
 
     final TextEditingController reasonController = TextEditingController();
 
-    // Show confirmation dialog with reason
     final bool? confirmDelete = await showDialog<bool>(
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text("Delete Discount"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Are you sure you want to delete discount for '$customerName'?",
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: reasonController,
-                  decoration: const InputDecoration(
-                    labelText: 'Reason for deletion *',
-                    hintText: 'Enter reason for deleting this discount...',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.note),
-                  ),
-                  maxLines: 3,
-                  autofocus: true,
-                ),
-              ],
+        title: const Text("Delete Discount"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Are you sure you want to delete discount for '$customerName'?",
             ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context, false);
-                },
-                child: const Text("Cancel"),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Reason for deletion *',
+                hintText: 'Enter reason for deleting this discount...',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.note),
               ),
-              ElevatedButton(
-                onPressed: () {
-                  if (reasonController.text.trim().isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Please enter a reason for deletion"),
-                        backgroundColor: Colors.orange,
-                      ),
-                    );
-                    return;
-                  }
-                  Navigator.pop(context, true);
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text(
-                  "Delete",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
+              maxLines: 3,
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context, false);
+            },
+            child: const Text("Cancel"),
           ),
+          ElevatedButton(
+            onPressed: () {
+              if (reasonController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Please enter a reason for deletion"),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context, true);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
     );
 
-    // If user confirmed deletion
     if (confirmDelete == true) {
       final deleteReason = reasonController.text.trim();
 
@@ -353,7 +379,6 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
       });
 
       try {
-        // Prepare delete request body
         Map<String, dynamic> deleteRequestBody = {
           "unid": "20260117130317",
           "veh": "MQ--",
@@ -367,10 +392,10 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
 
         final response = await http
             .post(
-              Uri.parse(deleteApiUrl),
-              headers: {'Content-Type': 'application/json'},
-              body: json.encode(deleteRequestBody),
-            )
+          Uri.parse(deleteApiUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(deleteRequestBody),
+        )
             .timeout(const Duration(seconds: 10));
 
         print("📥 Delete response status: ${response.statusCode}");
@@ -382,14 +407,12 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
           if (responseData['result'] == "1") {
             print("✅ Discount deleted successfully from API");
 
-            // Remove from local lists
             setState(() {
               allDiscounts.removeWhere((c) => c['id'] == discountId);
-              discounts.removeWhere((c) => c['id'] == discountId);
+              displayedDiscounts.removeWhere((c) => c['id'] == discountId);
               isDeleting = false;
             });
 
-            // Show success message
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -400,10 +423,8 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
               ),
             );
 
-            // Refresh data from API to ensure sync
-            _fetchDiscountsFromApi();
+            _fetchDiscountsFromApi(resetPagination: true);
           } else {
-            // API returned error
             setState(() {
               isDeleting = false;
             });
@@ -458,8 +479,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
       MaterialPageRoute(builder: (context) => NewDiscountPage()),
     ).then((newDiscount) {
       if (newDiscount != null && newDiscount is Map<String, dynamic>) {
-        // Refresh data from API after adding
-        _fetchDiscountsFromApi();
+        _fetchDiscountsFromApi(resetPagination: true);
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -474,24 +494,21 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
   // Refresh data
   Future<void> _refreshData() async {
     print("🔄 Refreshing discounts data from API");
-    // Clear search when refreshing
-    searchController.clear();
-    await _fetchDiscountsFromApi();
-  }
-
-  // Clear search
-  void _clearSearch() {
-    searchController.clear();
-    // The listener will handle resetting the list
+    setState(() {
+      currentPage = 1;
+      searchQuery = '';
+      searchController.clear();
+    });
+    await _fetchDiscountsFromApi(resetPagination: true);
   }
 
   @override
   Widget build(BuildContext context) {
     print("🎨 Building DiscountMainPage UI...");
     print("   All discounts count: ${allDiscounts.length}");
-    print("   Displayed discounts: ${discounts.length}");
-    print("   Search text: '${searchController.text}'");
-    print("   Is searching: $isSearching");
+    print("   Displayed discounts: ${displayedDiscounts.length}");
+    print("   Search query: '$searchQuery'");
+    print("   Current page: $currentPage, Total pages: $totalPages, Has more: $hasMorePages");
 
     return Scaffold(
       appBar: AppBar(
@@ -519,7 +536,6 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         children: [
           _buildBody(),
 
-          // Global loading overlay for delete operation
           if (isDeleting)
             Container(
               color: Colors.black.withOpacity(0.3),
@@ -545,7 +561,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
   }
 
   Widget _buildBody() {
-    if (isLoading) {
+    if (isLoading && allDiscounts.isEmpty) {
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -558,26 +574,40 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
       );
     }
 
-    if (allDiscounts.isEmpty) {
+    if (allDiscounts.isEmpty && !isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.discount, size: 80, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            const Text(
-              'No Discounts Found',
-              style: TextStyle(
+            Text(
+              searchQuery.isNotEmpty
+                  ? 'No discounts found for "$searchQuery"'
+                  : 'No Discounts Found',
+              style: const TextStyle(
                 fontSize: 18,
                 color: Colors.grey,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Tap the + button to add your first discount',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+            Text(
+              searchQuery.isNotEmpty
+                  ? 'Try a different search term or clear search'
+                  : 'Tap the + button to add your first discount',
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
+            const SizedBox(height: 20),
+            if (searchQuery.isNotEmpty)
+              ElevatedButton(
+                onPressed: _clearSearch,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey,
+                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                ),
+                child: const Text('Clear Search', style: TextStyle(color: Colors.white)),
+              ),
           ],
         ),
       );
@@ -604,12 +634,12 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                       hintText: "Search by customer or notes...",
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon:
-                          searchController.text.isNotEmpty
-                              ? IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: _clearSearch,
-                              )
-                              : null,
+                      searchController.text.isNotEmpty
+                          ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: _clearSearch,
+                      )
+                          : null,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -617,22 +647,10 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                         horizontal: 12,
                       ),
                     ),
-                    onChanged: (value) {
-                      // The listener will handle filtering
+                    onChanged: _searchDiscounts,
+                    onSubmitted: (_) {
+                      FocusScope.of(context).unfocus();
                     },
-                    onSubmitted: (value) {
-                      _performSearch();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton.icon(
-                  onPressed: _clearSearch,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("Clear"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey.shade200,
-                    foregroundColor: Colors.black,
                   ),
                 ),
               ],
@@ -641,13 +659,13 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
         ),
 
         // Search result info
-        if (isSearching)
+        if (searchQuery.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 Text(
-                  'Found ${discounts.length} result${discounts.length != 1 ? 's' : ''}',
+                  'Found ${displayedDiscounts.length} result${displayedDiscounts.length != 1 ? 's' : ''}',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade600,
@@ -681,7 +699,7 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          allDiscounts.length.toString(),
+                          totalDiscounts,
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -729,18 +747,70 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
           ),
         ),
 
-        // Discounts List
+        // Discounts List with Pagination
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            itemCount: discounts.length,
+            itemCount: displayedDiscounts.length + (hasMorePages ? 1 : 0),
             itemBuilder: (context, index) {
-              final discount = discounts[index];
+              // Check if this is the load more button item
+              if (index == displayedDiscounts.length) {
+                return _buildLoadMoreButton();
+              }
+
+              final discount = displayedDiscounts[index];
               return _discountCard(discount);
             },
           ),
         ),
       ],
+    );
+  }
+
+  // Load More Button for Pagination
+  Widget _buildLoadMoreButton() {
+    if (!hasMorePages) {
+      return const SizedBox.shrink();
+    }
+
+    if (isLoadingMore) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        child: const Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 16),
+              Text('Loading more discounts...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: ElevatedButton(
+          onPressed: _loadMoreDiscounts,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade800,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_downward, size: 18),
+              const SizedBox(width: 8),
+              Text('Load More (Page $currentPage of $totalPages)'),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -868,12 +938,12 @@ class _DiscountMainPageState extends State<DiscountMainPage> {
                 const SizedBox(width: 8),
                 IconButton(
                   onPressed:
-                      isDeleting
-                          ? null
-                          : () => _deleteDiscount(
-                            discount['id'],
-                            discount['customerName'],
-                          ),
+                  isDeleting
+                      ? null
+                      : () => _deleteDiscount(
+                    discount['id'],
+                    discount['customerName'],
+                  ),
                   icon: const Icon(Icons.delete, size: 18),
                   color: Colors.red,
                   tooltip: 'Delete',

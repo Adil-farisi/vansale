@@ -78,37 +78,71 @@ class FinancialYearService {
     }
   }
 
-  // Check if user is first time
-  static Future<bool> isFirstTimeUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    final isFirstTime = prefs.getBool(_isFirstTimeKey) ?? true;
-    print('🔍 First time user check: $isFirstTime');
-    return isFirstTime;
-  }
-
-  // Set first time user flag
-  static Future<void> setFirstTimeUser(bool isFirstTime) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_isFirstTimeKey, isFirstTime);
-    print('📝 First time user flag set to: $isFirstTime');
-  }
-
-  // Save selected financial year
-  static Future<void> saveSelectedYear(FinancialYear year) async {
-    print('\n🔵 ===== SAVING SELECTED YEAR =====');
+  // Update selected financial year on server
+  static Future<bool> updateSelectedYearOnServer(FinancialYear year) async {
+    print('\n🟢 ===== UPDATING SELECTED YEAR ON SERVER =====');
     try {
+      // Get user credentials
+      final credentials = await getUserCredentials();
+
+      final unid = credentials['unid']!;
+      final veh = credentials['veh']!;
+
+      if (unid.isEmpty || veh.isEmpty) {
+        print('⚠️ Credentials missing, cannot update on server');
+        print('🟢 ===== UPDATE SKIPPED =====\n');
+        return false;
+      }
+
+      print('📋 Updating with:');
+      print('├─ unid: $unid');
+      print('├─ veh: $veh');
+      print('└─ finid: ${year.id} (${year.displayName})');
+
+      // Call API to update
+      final success = await ApiService.updateFinancialYear(unid, veh, year.id);
+
+      if (success) {
+        print('✅ Server updated successfully with finid: ${year.id}');
+      } else {
+        print('❌ Server update failed');
+      }
+
+      print('🟢 ===== SERVER UPDATE COMPLETED =====\n');
+      return success;
+    } catch (e) {
+      print('❌ Error updating on server: $e');
+      print('🟢 ===== SERVER UPDATE FAILED =====\n');
+      return false;
+    }
+  }
+
+  // Save selected financial year locally and update server
+  static Future<bool> saveSelectedYear(FinancialYear year) async {
+    print('\n🔵 ===== SAVING SELECTED YEAR =====');
+    bool serverSuccess = false;
+
+    try {
+      // First try to update on server
+      serverSuccess = await updateSelectedYearOnServer(year);
+
+      // Then save locally regardless of server success (for offline access)
       final prefs = await SharedPreferences.getInstance();
       String yearJson = jsonEncode(year.toJson());
       await prefs.setString(_selectedYearKey, yearJson);
 
-      print('✅ Selected year saved:');
+      print('✅ Selected year saved locally:');
       print('├─ id: ${year.id}');
       print('├─ displayName: ${year.displayName}');
-      print('└─ isDefault: ${year.isDefault}');
+      print('└─ server update: ${serverSuccess ? 'SUCCESS' : 'FAILED'}');
+
     } catch (e) {
       print('❌ Error saving selected year: $e');
+      serverSuccess = false;
     }
-    print('🔵 ===== YEAR SAVED =====\n');
+
+    print('🔵 ===== YEAR SAVE COMPLETED =====\n');
+    return serverSuccess;
   }
 
   // Load selected financial year
@@ -136,6 +170,21 @@ class FinancialYearService {
     }
     print('🔵 ===== LOAD COMPLETED =====\n');
     return null;
+  }
+
+  // Check if user is first time
+  static Future<bool> isFirstTimeUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isFirstTime = prefs.getBool(_isFirstTimeKey) ?? true;
+    print('🔍 First time user check: $isFirstTime');
+    return isFirstTime;
+  }
+
+  // Set first time user flag
+  static Future<void> setFirstTimeUser(bool isFirstTime) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_isFirstTimeKey, isFirstTime);
+    print('📝 First time user flag set to: $isFirstTime');
   }
 
   // Save all financial years

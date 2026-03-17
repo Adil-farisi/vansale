@@ -24,7 +24,7 @@ class _LoginState extends State<Login> {
   bool _isLoading = false;
 
   // FIXED: Hardcoded URL to match your other API calls
-  final String baseUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales";
+  final String baseUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales";
 
   // Show permission loading overlay
   void _showPermissionLoading(BuildContext context) {

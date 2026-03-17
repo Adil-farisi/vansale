@@ -112,7 +112,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
 
   Future<void> _fetchCustomers() async {
     print('👥 DEBUG: Starting _fetchCustomers');
-    print('👥 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php');
+    print('👥 DEBUG: API URL: http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customers.php');
     print('👥 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     setState(() {
@@ -121,7 +121,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
@@ -229,7 +229,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
 
   Future<void> _fetchWallets() async {
     print('💰 DEBUG: Starting _fetchWallets');
-    print('💰 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php');
+    print('💰 DEBUG: API URL: http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_wallets.php');
     print('💰 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     setState(() {
@@ -238,7 +238,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_wallets.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
@@ -392,7 +392,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
     final year = date.year.toString();
-    return '$day/$month/$year';
+    return '$day-$month-$year';
   }
 
   // Format date for API (dd-MM-yyyy)
@@ -511,7 +511,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
         };
 
         print('💾 DEBUG: Sending receipt data to API:');
-        print('💾 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php');
+        print('💾 DEBUG: API URL: http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/receipt.php');
         print('💾 DEBUG: Request body:');
         print('💾 DEBUG:   unid: ${requestData["unid"]}');
         print('💾 DEBUG:   veh: ${requestData["veh"]}');
@@ -526,7 +526,7 @@ class _ReceiptSavePageState extends State<ReceiptSavePage> {
 
         // Make API call
         final response = await http.post(
-          Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php'),
+          Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/receipt.php'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode(requestData),
         );

@@ -71,10 +71,7 @@ void showStockSectionSwitcher(
             ),
             const SizedBox(height: 10),
 
-            tile("Trading Items", Icons.inventory_2,
-                const TradingItemsPage()),
-            tile("Finished Goods", Icons.inventory,
-                const FinishedGoodsPage()),
+
             tile("Batch-wise Stock", Icons.confirmation_number,
                 const BatchWiseStockPage()),
             tile("Current Stock", Icons.assignment_turned_in,

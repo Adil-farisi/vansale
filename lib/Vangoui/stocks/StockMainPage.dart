@@ -43,22 +43,8 @@ class StockMainPage extends StatelessWidget {
                 mainAxisSpacing: 16,
                 childAspectRatio: 1.2,
                 children: [
-                  _buildStockOption(
-                    context,
-                    icon: Icons.inventory_2,
-                    title: 'Trading Items',
-                    subtitle: 'View trading items',
-                    color: Colors.blue,
-                    page: const TradingItemsPage(),
-                  ),
-                  _buildStockOption(
-                    context,
-                    icon: Icons.inventory_2,
-                    title: 'Finished Goods',
-                    subtitle: 'View finished goods',
-                    color: Colors.green,
-                    page: const FinishedGoodsPage(),
-                  ),
+
+
                   _buildStockOption(
                     context,
                     icon: Icons.confirmation_number,

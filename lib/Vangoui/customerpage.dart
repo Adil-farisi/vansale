@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -11,6 +12,7 @@ import 'package:van_go/Vangoui/permissions/permission_provider.dart';
 
 import 'customer_api_service.dart';
 import 'customer_model.dart';
+
 
 class CustomerPage extends StatelessWidget {
   const CustomerPage({super.key});
@@ -36,8 +38,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
   bool isLoading = true;
   bool isLoadingSessionData = true;
   bool isLoadingOutstanding = false;
+  bool isLoadingMore = false; // For pagination loading
   String errorMessage = '';
   int totalCustomers = 0;
+  int currentPage = 1;
+  int totalPages = 1;
+  bool hasMorePages = false;
   String searchQuery = '';
 
   String unid = '';
@@ -46,20 +52,54 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
   late CustomerApiService customerApiService;
   final TextEditingController _searchController = TextEditingController();
 
-  // FIXED: Track current filter state
+  // Track current filter state
   String? currentFilter; // 'active', 'inactive', 'outstanding', or null for all
 
+  // Debounce timer for search
+  Timer? _debounceTimer;
+
+  // Scroll controller for pagination
+  final ScrollController _scrollController = ScrollController();
+
+  @override
   @override
   void initState() {
     super.initState();
     print('🚀 DEBUG: CustomerPage initState called');
     _loadSessionData();
+
+    // Add scroll listener for pagination with post frame callback
+    _scrollController.addListener(() {
+      // Use post frame callback to avoid layout issues
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _onScroll();
+        }
+      });
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _debounceTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  // Scroll listener for pagination
+  // Update the _onScroll method
+  void _onScroll() {
+    // Use WidgetsBinding to schedule the scroll check after the current frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients &&
+          _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+        // User scrolled near the bottom, load more data
+        if (!isLoadingMore && hasMorePages && !isLoading) {
+          _loadMoreCustomers();
+        }
+      }
+    });
   }
 
   Future<void> _loadSessionData() async {
@@ -94,7 +134,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       print('✅ DEBUG: Creating CustomerApiService');
       customerApiService = CustomerApiService();
       print('🚀 DEBUG: Calling _fetchCustomers');
-      _fetchCustomers();
+      _fetchCustomers(resetPagination: true);
     } catch (e) {
       print('❌ DEBUG: Error loading session data: $e');
       if (mounted) {
@@ -115,8 +155,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     }
 
     print('💰 DEBUG: Starting _fetchCustomerOutstanding');
-    print('💰 DEBUG: API URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php');
-    print('💰 DEBUG: Request body: {"unid": "$unid", "veh": "$veh"}');
 
     if (mounted) {
       setState(() {
@@ -126,22 +164,20 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/customers.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           "unid": unid,
           "veh": veh,
-          "srch":"",
-          "page":""
+          "srch": "",
+          "page": ""
         }),
       );
 
       print('💰 DEBUG: Outstanding API response status: ${response.statusCode}');
-      print('💰 DEBUG: Outstanding API response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
-        print('💰 DEBUG: Outstanding API parsed response: $data');
 
         if (data['result'] == "1") {
           final List<dynamic> customerList = data['customerdet'] ?? [];
@@ -157,7 +193,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                 'name': custName,
                 'outstandingAmount': outstandingAmt,
               };
-              print('💰 DEBUG: Customer $custid - Name: $custName - Outstanding: $outstandingAmt');
             }
           }
 
@@ -167,12 +202,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
               print('💰 DEBUG: Loaded outstanding amounts for ${customerOutstandingData.length} customers');
             });
           }
-        } else {
-          print('❌ DEBUG: Outstanding API returned result: ${data['result']}');
-          print('❌ DEBUG: Outstanding API message: ${data['message']}');
         }
-      } else {
-        print('❌ DEBUG: Outstanding API HTTP error: ${response.statusCode}');
       }
     } catch (e) {
       print('❌ DEBUG: Exception in _fetchCustomerOutstanding: $e');
@@ -185,10 +215,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     }
   }
 
-  // =================== FETCH CUSTOMERS WITH OUTSTANDING ===================
-  Future<void> _fetchCustomers() async {
+  // =================== FETCH CUSTOMERS WITH SEARCH AND PAGINATION ===================
+  Future<void> _fetchCustomers({bool resetPagination = true}) async {
     print('🎯 DEBUG: Starting _fetchCustomers');
-    print('🎯 DEBUG: unid = $unid, veh = $veh');
+    print('🎯 DEBUG: Search query = "$searchQuery"');
+    print('🎯 DEBUG: Reset pagination = $resetPagination');
+    print('🎯 DEBUG: Current page before = $currentPage');
 
     if (unid.isEmpty || veh.isEmpty) {
       print('❌ DEBUG: Missing session data in _fetchCustomers');
@@ -201,36 +233,28 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       return;
     }
 
-    if (mounted) {
-      setState(() {
-        isLoading = true;
-        errorMessage = '';
-        // FIXED: Don't clear searchQuery when fetching
-        allCustomers = [];
-        displayedCustomers = [];
-        customerOutstandingData = {};
-      });
+    if (resetPagination) {
+      if (mounted) {
+        setState(() {
+          isLoading = true;
+          errorMessage = '';
+          currentPage = 1;
+          allCustomers = [];
+          hasMorePages = false;
+        });
+      }
     }
 
-    print('📡 DEBUG: Calling API with search: "${_searchController.text}"');
+    print('📡 DEBUG: Calling API with search: "$searchQuery", page: $currentPage');
 
     try {
-      // Fetch customers AND outstanding amounts in parallel
-      print('📡 DEBUG: Starting parallel API calls');
-      final mainApiCall = customerApiService.fetchCustomers(
-        search: _searchController.text,
-        page: '',
+      final result = await customerApiService.fetchCustomers(
+        search: searchQuery,
+        page: currentPage.toString(),
       );
-      final outstandingApiCall = _fetchCustomerOutstanding();
-
-      // Wait for both to complete
-      final List<dynamic> results = await Future.wait([mainApiCall, outstandingApiCall]);
-      final result = results[0] as Map<String, dynamic>;
 
       print('📡 DEBUG: API Response received');
       print('📡 DEBUG: Response success: ${result['success']}');
-      print('📡 DEBUG: Response message: ${result['message']}');
-      print('📡 DEBUG: Total customers from API: ${result['totalCustomers']}');
 
       if (!mounted) {
         print('⚠️ DEBUG: Widget not mounted, returning');
@@ -238,12 +262,8 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       }
 
       if (result['success'] == true) {
-        // Get the customers list and ensure it's List<CustomerModel>
         List<CustomerModel> customers = [];
-        if (result['customers'] is List<CustomerModel>) {
-          customers = result['customers'] as List<CustomerModel>;
-        } else if (result['customers'] is List) {
-          // Convert list to CustomerModel if needed
+        if (result['customers'] is List) {
           final List<dynamic> rawList = result['customers'] as List<dynamic>;
           customers = rawList.map((item) {
             if (item is CustomerModel) {
@@ -251,7 +271,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
             } else if (item is Map<String, dynamic>) {
               return CustomerModel.fromJson(item);
             } else {
-              // Return a default customer model
               return CustomerModel(
                 custid: '',
                 custname: '',
@@ -275,157 +294,127 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           }).toList();
         }
 
-        // DEBUG: Print all customer IDs from main API
-        print('📊 DEBUG: Main API returned ${customers.length} customers:');
-        for (var customer in customers) {
-          print('📊 DEBUG: - ${customer.custid}: ${customer.custname} - Status: ${customer.status}');
-        }
-
-        // DEBUG: Print all customer IDs from outstanding API
-        print('💰 DEBUG: Outstanding API has ${customerOutstandingData.length} customers:');
-        customerOutstandingData.forEach((custid, data) {
-          print('💰 DEBUG: - $custid: ${data['name']} - ${data['outstandingAmount']}');
-        });
+        print('📊 DEBUG: Main API returned ${customers.length} customers for page $currentPage');
 
         // Update customers with outstanding amounts
         final List<CustomerModel> updatedCustomers = customers.map((customer) {
           final outstandingData = customerOutstandingData[customer.custid];
           final outstanding = outstandingData?['outstandingAmount'] ?? '0.00';
-          print('💰 DEBUG: Customer ${customer.custid} - Outstanding: $outstanding');
           return customer.copyWith(outstandingAmount: outstanding);
         }).toList();
 
-        // ALSO ADD CUSTOMERS FROM OUTSTANDING API THAT ARE NOT IN MAIN API
-        final Set<String> mainCustomerIds = Set.from(customers.map((c) => c.custid));
-        final Set<String> outstandingCustomerIds = Set.from(customerOutstandingData.keys);
+        // Calculate pagination
+        int totalCustomersFromApi = int.tryParse(result['totalCustomers']?.toString() ?? '0') ?? 0;
+        int itemsPerPage = customers.length > 0 ? customers.length : 1;
+        int totalPagesFromApi = (totalCustomersFromApi / itemsPerPage).ceil();
+        bool hasMoreFromApi = currentPage < totalPagesFromApi;
 
-        // Find customers that are in outstanding API but not in main API
-        final missingCustomerIds = outstandingCustomerIds.difference(mainCustomerIds);
-
-        if (missingCustomerIds.isNotEmpty) {
-          print('🔍 DEBUG: Found ${missingCustomerIds.length} customers in outstanding API but not in main API: $missingCustomerIds');
-
-          // Create placeholder CustomerModel objects for these customers
-          final List<CustomerModel> missingCustomers = missingCustomerIds.map((custid) {
-            final data = customerOutstandingData[custid]!;
-            return CustomerModel(
-              custid: custid,
-              custname: data['name'] ?? 'Customer $custid',
-              custType: '0',
-              custTypeName: '',
-              address: '',
-              gst: '',
-              phone: '',
-              email: '',
-              landPhone: '',
-              opBln: 0.0,
-              state: '',
-              stateCode: '',
-              creditDays: 0,
-              opAcc: 'dr',
-              status: 'active', // Default to active for missing customers
-              balance: '0.00',
-              slex: '',
-              outstandingAmount: data['outstandingAmount'] ?? '0.00',
-            );
-          }).toList();
-
-          // Add to the list
-          updatedCustomers.addAll(missingCustomers);
-        }
+        print('📊 DEBUG: Calculated pagination:');
+        print('📊 DEBUG: - totalCustomers: $totalCustomersFromApi');
+        print('📊 DEBUG: - itemsPerPage: $itemsPerPage');
+        print('📊 DEBUG: - totalPages: $totalPagesFromApi');
+        print('📊 DEBUG: - currentPage: $currentPage');
+        print('📊 DEBUG: - hasMore: $hasMoreFromApi');
 
         setState(() {
-          allCustomers = updatedCustomers;
+          if (resetPagination) {
+            allCustomers = updatedCustomers;
+          } else {
+            allCustomers.addAll(updatedCustomers);
+          }
 
-          // FIXED: Apply current filter or show all customers
+          totalCustomers = totalCustomersFromApi;
+          totalPages = totalPagesFromApi;
+          hasMorePages = hasMoreFromApi;
+
           _applyCurrentFilter();
 
-          totalCustomers = allCustomers.length;
-          print('✅ DEBUG: Total loaded customers: ${allCustomers.length}');
-          print('✅ DEBUG: Displaying ${displayedCustomers.length} customers');
-          print('✅ DEBUG: Loaded outstanding amounts for ${customerOutstandingData.length} customers');
+          isLoading = false;
+          isLoadingMore = false;
 
-          if (allCustomers.isNotEmpty) {
-            for (var i = 0; i < min(5, allCustomers.length); i++) {
-              print('✅ DEBUG: Customer $i: ${allCustomers[i].custid} - ${allCustomers[i].custname} - Status: ${allCustomers[i].status} - ${allCustomers[i].outstandingAmount}');
-            }
-          }
+          print('✅ DEBUG: After setState:');
+          print('✅ DEBUG: - allCustomers length: ${allCustomers.length}');
+          print('✅ DEBUG: - displayedCustomers length: ${displayedCustomers.length}');
+          print('✅ DEBUG: - currentPage: $currentPage');
+          print('✅ DEBUG: - totalPages: $totalPages');
+          print('✅ DEBUG: - hasMorePages: $hasMorePages');
         });
+
+        // Fetch outstanding amounts in background
+        _fetchCustomerOutstanding();
+
       } else {
         setState(() {
           errorMessage = result['message'] ?? 'Failed to load customers';
-          print('❌ DEBUG: API Error: $errorMessage');
+          isLoading = false;
+          isLoadingMore = false;
         });
       }
-
-      setState(() {
-        isLoading = false;
-      });
     } catch (e) {
       print('❌ DEBUG: Exception in _fetchCustomers: $e');
       if (mounted) {
         setState(() {
           isLoading = false;
+          isLoadingMore = false;
           errorMessage = 'Failed to load customers: $e';
-          print('❌ DEBUG: Error message set: $errorMessage');
         });
       }
     }
   }
 
+  // Load more customers for pagination
+  Future<void> _loadMoreCustomers() async {
+    if (isLoadingMore || !hasMorePages) {
+      print('📄 DEBUG: Cannot load more - isLoadingMore: $isLoadingMore, hasMorePages: $hasMorePages');
+      return;
+    }
+
+    print('📄 DEBUG: Loading more customers - Page ${currentPage + 1} of $totalPages');
+
+    setState(() {
+      isLoadingMore = true;
+    });
+
+    currentPage++;
+    await _fetchCustomers(resetPagination: false);
+  }
+
   // =================== SEARCH FUNCTIONALITY ===================
   void _searchCustomers(String query) {
     print('🔍 DEBUG: Searching for: $query');
-    if (!mounted) return;
 
     setState(() {
-      searchQuery = query.trim().toLowerCase();
+      searchQuery = query;
+    });
 
-      if (searchQuery.isEmpty) {
-        // FIXED: Apply current filter instead of showing all
-        _applyCurrentFilter();
-        print('🔍 DEBUG: Search cleared, applying current filter');
-      } else {
-        // Filter by search query first
-        List<CustomerModel> searchFiltered = allCustomers.where((customer) {
-          return customer.custname.toLowerCase().contains(searchQuery) ||
-              customer.custid.toLowerCase().contains(searchQuery) ||
-              (customer.phone?.toLowerCase() ?? '').contains(searchQuery) ||
-              (customer.email?.toLowerCase() ?? '').contains(searchQuery) ||
-              (customer.address?.toLowerCase() ?? '').contains(searchQuery) ||
-              (customer.gst?.toLowerCase() ?? '').contains(searchQuery);
-        }).toList();
+    _debounceSearch();
+  }
 
-        // Then apply status filter if any
-        if (currentFilter == 'active') {
-          displayedCustomers = searchFiltered.where((c) => c.isActive).toList();
-        } else if (currentFilter == 'inactive') {
-          displayedCustomers = searchFiltered.where((c) => !c.isActive).toList();
-        } else if (currentFilter == 'outstanding') {
-          displayedCustomers = searchFiltered.where((c) => c.hasOutstanding).toList();
-        } else {
-          displayedCustomers = searchFiltered;
-        }
+  void _debounceSearch() {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
 
-        print('🔍 DEBUG: Found ${displayedCustomers.length} customers matching "$searchQuery"');
-      }
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _fetchCustomers(resetPagination: true);
     });
   }
 
   void _clearSearch() {
     print('🔍 DEBUG: Clearing search');
-    if (!mounted) return;
+
+    _debounceTimer?.cancel();
 
     setState(() {
       searchQuery = '';
       _searchController.clear();
-      // FIXED: Apply current filter instead of showing all
-      _applyCurrentFilter();
-      FocusScope.of(context).unfocus();
     });
+
+    _fetchCustomers(resetPagination: true);
+    FocusScope.of(context).unfocus();
   }
 
-  // FIXED: New method to apply current filter
+  // Apply current filter
   void _applyCurrentFilter() {
     if (currentFilter == 'active') {
       displayedCustomers = allCustomers.where((c) => c.isActive).toList();
@@ -439,7 +428,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     print('🔍 DEBUG: Applied filter "$currentFilter" - showing ${displayedCustomers.length} customers');
   }
 
-  // FIXED: Updated to keep inactive customers visible
+  // Toggle customer status
   void _toggleCustomerStatus(int index) async {
     final customer = displayedCustomers[index];
     final newStatus = !customer.isActive;
@@ -447,28 +436,17 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
 
     print('🔄 DEBUG: Toggling customer ${customer.custname} status to $statusText');
 
-    // Cancel any ongoing SnackBar operations
     ScaffoldMessenger.of(context).clearSnackBars();
 
-    // Store references to SnackBars
     ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? checkingSnackbar;
     ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? loadingSnackbar;
 
-    // First check if we can deactivate (if going to inactive)
     if (!newStatus) {
-      // Show loading while checking status
       checkingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              ),
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
               const SizedBox(width: 15),
               const Text('Checking customer status...'),
             ],
@@ -479,41 +457,26 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       );
 
       try {
-        // Check customer status using the API
-        print('🔍 DEBUG: Checking customer status before deactivation');
-
         Map<String, dynamic> statusResult;
         try {
-          // Try to use the checkCustomerStatus method if available
           statusResult = await customerApiService.checkCustomerStatus(customer.custid);
         } catch (e) {
-          print('⚠️ DEBUG: checkCustomerStatus method not available: $e');
-          // If method doesn't exist, create a direct request
           statusResult = await _checkCustomerStatusDirect(customer.custid);
         }
 
-        // Safely close the checking snackbar if it exists and is still showing
         try {
           if (checkingSnackbar != null && mounted) {
             checkingSnackbar.close();
           }
-        } catch (e) {
-          print('⚠️ DEBUG: Error closing checking snackbar: $e');
-        }
+        } catch (e) {}
 
-        // Clear any snackbars that might be in an inconsistent state
         if (mounted) {
           ScaffoldMessenger.of(context).clearSnackBars();
         }
 
-        print('🔍 DEBUG: Status check result: $statusResult');
-
         if (!statusResult['success'] || !statusResult['canDelete']) {
-          // Extract plain text from HTML message
           String errorMessage = statusResult['message']?.toString() ?? '';
-          // Remove HTML tags
           errorMessage = errorMessage.replaceAll(RegExp(r'<[^>]*>'), '');
-          // Decode HTML entities
           errorMessage = errorMessage
               .replaceAll('&lt;', '<')
               .replaceAll('&gt;', '>')
@@ -521,15 +484,10 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
               .replaceAll('&quot;', '"')
               .replaceAll('&#39;', "'");
 
-          // Show error message from API
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(
-                  errorMessage.isNotEmpty
-                      ? errorMessage
-                      : 'Cannot deactivate customer. Has pending outstanding amount.',
-                ),
+                content: Text(errorMessage.isNotEmpty ? errorMessage : 'Cannot deactivate customer. Has pending outstanding amount.'),
                 backgroundColor: Colors.red,
                 duration: const Duration(seconds: 4),
               ),
@@ -538,22 +496,16 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           return;
         }
       } catch (e) {
-        // Safely close the checking snackbar if it exists
         try {
           if (checkingSnackbar != null && mounted) {
             checkingSnackbar.close();
           }
-        } catch (e) {
-          print('⚠️ DEBUG: Error closing checking snackbar: $e');
-        }
+        } catch (e) {}
 
-        // Clear any snackbars that might be in an inconsistent state
         if (mounted) {
           ScaffoldMessenger.of(context).clearSnackBars();
         }
 
-        print('❌ DEBUG: Error checking customer status: $e');
-        // If status check fails, still allow the status change but show warning
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -566,24 +518,15 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       }
     }
 
-    // Clear any existing snackbars before showing loading
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
     }
 
-    // Show loading for status update
     loadingSnackbar = ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            ),
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             const SizedBox(width: 15),
             Text('Updating customer status to ${newStatus ? 'Active' : 'Inactive'}...'),
           ],
@@ -594,62 +537,38 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     );
 
     try {
-      // Call API to update status
-      print('📤 DEBUG: Calling updateCustomerStatus API');
       final result = await customerApiService.updateCustomerStatus(
         custId: customer.custid,
         isActive: newStatus,
       );
 
-      // Safely close the loading snackbar if it exists
       try {
         if (loadingSnackbar != null && mounted) {
           loadingSnackbar.close();
         }
-      } catch (e) {
-        print('⚠️ DEBUG: Error closing loading snackbar: $e');
-      }
+      } catch (e) {}
 
-      // Clear any snackbars that might be in an inconsistent state
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
       }
 
-      print('📥 DEBUG: Update status result: $result');
-
       if (result['success'] == true) {
-        // FIXED: Update in place without removing from list
         if (mounted) {
           setState(() {
-            // Create updated customer with new status
-            final updatedCustomer = customer.copyWith(
-              status: statusText,
-            );
+            final updatedCustomer = customer.copyWith(status: statusText);
 
-            // Update in displayedCustomers (keep in list)
             displayedCustomers[index] = updatedCustomer;
 
-            // Also update in allCustomers list
             final allIndex = allCustomers.indexWhere((c) => c.custid == customer.custid);
             if (allIndex != -1) {
               allCustomers[allIndex] = updatedCustomer;
             }
 
-            // FIXED: If we're on the active filter and we made a customer inactive,
-            // we should remove it from the displayed list if we're filtering by active
             if (currentFilter == 'active' && !newStatus) {
               displayedCustomers.removeAt(index);
-            }
-            // If we're on the inactive filter and we made a customer active,
-            // we should remove it from the displayed list if we're filtering by inactive
-            else if (currentFilter == 'inactive' && newStatus) {
+            } else if (currentFilter == 'inactive' && newStatus) {
               displayedCustomers.removeAt(index);
             }
-            // Otherwise, keep the customer in the list with updated status
-
-            print('✅ DEBUG: Customer status updated successfully');
-            print('✅ DEBUG: Total customers: ${allCustomers.length}');
-            print('✅ DEBUG: Displayed customers: ${displayedCustomers.length}');
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -661,7 +580,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           );
         }
       } else {
-        // Extract plain text from HTML message
         String errorMessage = result['message']?.toString() ?? 'Failed to update status';
         errorMessage = errorMessage.replaceAll(RegExp(r'<[^>]*>'), '');
         errorMessage = errorMessage
@@ -682,21 +600,15 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
         }
       }
     } catch (e) {
-      // Safely close the loading snackbar if it exists
       try {
         if (loadingSnackbar != null && mounted) {
           loadingSnackbar.close();
         }
-      } catch (e) {
-        print('⚠️ DEBUG: Error closing loading snackbar: $e');
-      }
+      } catch (e) {}
 
-      // Clear any snackbars that might be in an inconsistent state
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
       }
-
-      print('❌ DEBUG: Error updating customer status: $e');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -710,14 +622,11 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     }
   }
 
-  // =================== DIRECT CUSTOMER STATUS CHECK ===================
+  // Direct customer status check
   Future<Map<String, dynamic>> _checkCustomerStatusDirect(String custId) async {
     try {
-      print('🔍 DEBUG: Direct check customer status for ID: $custId');
-
-      // Make direct HTTP request
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/customers.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/customers.php'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'unid': unid,
@@ -727,48 +636,24 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
         }),
       );
 
-      print('🔍 DEBUG: Direct status check response status: ${response.statusCode}');
-      print('🔍 DEBUG: Direct status check response body: ${response.body}');
-
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
-        print('🔍 DEBUG: Parsed direct response: $data');
-
         return {
           'success': data['result'] == '1',
           'message': data['message'] ?? '',
           'canDelete': data['result'] == '1',
         };
       } else {
-        return {
-          'success': false,
-          'message': 'Server error: ${response.statusCode}',
-          'canDelete': false,
-        };
+        return {'success': false, 'message': 'Server error: ${response.statusCode}', 'canDelete': false};
       }
     } catch (e) {
-      print('❌ DEBUG: Error in direct status check: $e');
-      return {
-        'success': false,
-        'message': 'Connection error: $e',
-        'canDelete': false,
-      };
+      return {'success': false, 'message': 'Connection error: $e', 'canDelete': false};
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
-
-    print('🎨 DEBUG: Building CustomerPage');
-    print('🎨 DEBUG: isLoadingSessionData: $isLoadingSessionData');
-    print('🎨 DEBUG: isLoading: $isLoading');
-    print('🎨 DEBUG: isLoadingOutstanding: $isLoadingOutstanding');
-    print('🎨 DEBUG: allCustomers length: ${allCustomers.length}');
-    print('🎨 DEBUG: displayedCustomers length: ${displayedCustomers.length}');
-    print('🎨 DEBUG: customerOutstandingData length: ${customerOutstandingData.length}');
-    print('🎨 DEBUG: errorMessage: $errorMessage');
-    print('🎨 DEBUG: currentFilter: $currentFilter');
+    super.build(context);
 
     final permissionProvider = Provider.of<PermissionProvider>(context);
 
@@ -795,15 +680,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     );
   }
 
-  // =================== ACCESS DENIED SCREEN ===================
+  // Access denied screen
   Scaffold _buildAccessDeniedScreen(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.blue.shade800,
-        title: const Text(
-          'Customers',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
+        title: const Text('Customers', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -818,29 +700,11 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.lock_outline,
-                  size: 80,
-                  color: Colors.grey.shade400,
-                ),
+                Icon(Icons.lock_outline, size: 80, color: Colors.grey.shade400),
                 const SizedBox(height: 20),
-                const Text(
-                  'Limited Access',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                  ),
-                ),
+                const Text('Limited Access', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.grey)),
                 const SizedBox(height: 15),
-                const Text(
-                  'You do not have permission to view customers.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey,
-                  ),
-                ),
+                const Text('You do not have permission to view customers.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
               ],
             ),
           ),
@@ -849,7 +713,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     );
   }
 
-  // =================== APP BAR WITH WORKING SEARCH ===================
+  // App bar
   AppBar _buildAppBar(BuildContext context, PermissionProvider permissionProvider) {
     return AppBar(
       backgroundColor: Colors.blue.shade800,
@@ -857,50 +721,22 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
         children: [
           Container(
             padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
             child: const Icon(Icons.people_outline, color: Colors.white, size: 24),
           ),
           const SizedBox(width: 12),
-          const Text(
-            'Customers',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-              fontSize: 20,
-              letterSpacing: 0.5,
-            ),
-          ),
+          const Text('Customers', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontSize: 20)),
           const Spacer(),
           if (isLoadingOutstanding)
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              ),
+            const Padding(
+              padding: EdgeInsets.only(right: 8.0),
+              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             ),
           if (totalCustomers > 0 && !isLoadingOutstanding)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '$totalCustomers',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+              child: Text('$totalCustomers', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             ),
         ],
       ),
@@ -909,10 +745,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       actions: [
         IconButton(
           icon: const Icon(Icons.refresh, color: Colors.white),
-          onPressed: () {
-            print('🔄 DEBUG: Refresh button pressed');
-            _fetchCustomers();
-          },
+          onPressed: () => _fetchCustomers(resetPagination: true),
         ),
         if (permissionProvider.canAddCustomer())
           Padding(
@@ -921,29 +754,16 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.blue.shade800,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const Addcustomer()),
-                );
-              },
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const Addcustomer())),
               child: const Row(
                 children: [
                   Icon(Icons.add, size: 18),
                   SizedBox(width: 6),
-                  Text(
-                    "Add",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
+                  Text("Add", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 ],
               ),
             ),
@@ -961,13 +781,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
                   ),
                   child: Row(
                     children: [
@@ -991,9 +805,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                                 : null,
                           ),
                           onChanged: _searchCustomers,
-                          onSubmitted: (_) {
-                            FocusScope.of(context).unfocus();
-                          },
+                          onSubmitted: (_) => FocusScope.of(context).unfocus(),
                         ),
                       ),
                     ],
@@ -1007,19 +819,11 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(10),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
                 ),
                 child: IconButton(
                   icon: const Icon(Icons.filter_list, color: Colors.blue, size: 20),
-                  onPressed: () {
-                    _showFilterOptions(context);
-                  },
+                  onPressed: () => _showFilterOptions(context),
                 ),
               ),
             ],
@@ -1029,27 +833,18 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     );
   }
 
-  // =================== FILTER OPTIONS ===================
+  // Filter options
   void _showFilterOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return Container(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Filter Customers',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade800,
-                ),
-              ),
+              Text('Filter Customers', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue.shade800)),
               const SizedBox(height: 20),
               _buildFilterOption('Active Customers Only', Icons.check_circle, () {
                 Navigator.pop(context);
@@ -1072,10 +867,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey.shade100,
-                    foregroundColor: Colors.grey.shade800,
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.grey.shade100, foregroundColor: Colors.grey.shade800),
                   child: const Text('Close'),
                 ),
               ),
@@ -1095,9 +887,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
   }
 
   void _filterByStatus(String status) {
-    print('🔍 DEBUG: Filtering by status: $status');
     if (!mounted) return;
-
     setState(() {
       currentFilter = status;
       _applyCurrentFilter();
@@ -1107,9 +897,7 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
   }
 
   void _filterByOutstanding() {
-    print('💰 DEBUG: Filtering customers with outstanding amounts');
     if (!mounted) return;
-
     setState(() {
       currentFilter = 'outstanding';
       _applyCurrentFilter();
@@ -1119,27 +907,18 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
   }
 
   void _clearFilters() {
-    print('🔍 DEBUG: Clearing all filters');
-    if (!mounted) return;
-
+    _debounceTimer?.cancel();
     setState(() {
       currentFilter = null;
-      _applyCurrentFilter();
       searchQuery = '';
       _searchController.clear();
     });
+    _fetchCustomers(resetPagination: true);
   }
 
-  // =================== CUSTOMER LIST ===================
+  // Customer list
   Widget _buildCustomerList(PermissionProvider permissionProvider) {
-    print('📱 DEBUG: Building customer list');
-    print('📱 DEBUG: isLoading: $isLoading');
-    print('📱 DEBUG: isLoadingOutstanding: $isLoadingOutstanding');
-    print('📱 DEBUG: errorMessage: $errorMessage');
-    print('📱 DEBUG: displayedCustomers length: ${displayedCustomers.length}');
-
     if (isLoading) {
-      print('📱 DEBUG: Showing loading spinner');
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1153,7 +932,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     }
 
     if (errorMessage.isNotEmpty) {
-      print('📱 DEBUG: Showing error: $errorMessage');
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1162,19 +940,12 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                errorMessage,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red, fontSize: 16),
-              ),
+              child: Text(errorMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16)),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _fetchCustomers,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade800,
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-              ),
+              onPressed: () => _fetchCustomers(resetPagination: true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12)),
               child: const Text('Retry', style: TextStyle(fontSize: 16, color: Colors.white)),
             ),
           ],
@@ -1183,7 +954,6 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     }
 
     if (displayedCustomers.isEmpty) {
-      print('📱 DEBUG: Showing empty state');
       String emptyMessage = 'No Customers Found';
       if (searchQuery.isNotEmpty) {
         emptyMessage = 'No customers found for "$searchQuery"';
@@ -1200,22 +970,15 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              searchQuery.isNotEmpty || currentFilter != null
-                  ? Icons.search_off
-                  : Icons.people_outline,
+              searchQuery.isNotEmpty || currentFilter != null ? Icons.search_off : Icons.people_outline,
               size: 80,
               color: Colors.grey.shade400,
             ),
             const SizedBox(height: 20),
-            Text(
-              emptyMessage,
-              style: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.bold),
-            ),
+            Text(emptyMessage, style: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(
-              searchQuery.isNotEmpty || currentFilter != null
-                  ? 'Try a different search term or clear filters'
-                  : 'Add your first customer to get started',
+              searchQuery.isNotEmpty || currentFilter != null ? 'Try a different search term or clear filters' : 'Add your first customer to get started',
               style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
             const SizedBox(height: 20),
@@ -1225,20 +988,13 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                 if (searchQuery.isNotEmpty || currentFilter != null)
                   ElevatedButton(
                     onPressed: _clearFilters,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.grey, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
                     child: const Text('Clear Filters', style: TextStyle(color: Colors.white)),
                   ),
-                if (searchQuery.isNotEmpty || currentFilter != null)
-                  const SizedBox(width: 10),
+                if (searchQuery.isNotEmpty || currentFilter != null) const SizedBox(width: 10),
                 ElevatedButton(
-                  onPressed: _fetchCustomers,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade800,
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                  ),
+                  onPressed: () => _fetchCustomers(resetPagination: true),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12)),
                   child: const Text('Refresh', style: TextStyle(fontSize: 16, color: Colors.white)),
                 ),
               ],
@@ -1248,240 +1004,198 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
       );
     }
 
-    print('📱 DEBUG: Showing list with ${displayedCustomers.length} customers');
     return RefreshIndicator(
-      onRefresh: _fetchCustomers,
-      child: ListView.separated(
+      onRefresh: () => _fetchCustomers(resetPagination: true),
+      child: ListView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.all(16),
-        itemCount: displayedCustomers.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 12),
+        itemCount: displayedCustomers.length + (hasMorePages ? 1 : 0),
+        // Add a key to help with rebuilding
+        key: PageStorageKey('customer_list'),
         itemBuilder: (context, index) {
+          if (index == displayedCustomers.length) {
+            return _buildLoadMoreButton();
+          }
+
           final customer = displayedCustomers[index];
           final isActive = customer.isActive;
           final outstanding = customer.outstandingAmount ?? '0.00';
-
-          // Determine if outstanding amount is positive (Cr) or negative (Dr)
           final isPositive = outstanding.contains('Cr');
           final amountColor = isPositive ? Colors.red : Colors.green;
 
-          return Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            elevation: 2,
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Profile Icon
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isActive ? Colors.blue.shade50 : Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(10),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 2,
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isActive ? Colors.blue.shade50 : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.person, size: 30, color: isActive ? Colors.blue.shade700 : Colors.grey),
                     ),
-                    child: Icon(
-                      Icons.person,
-                      size: 30,
-                      color: isActive ? Colors.blue.shade700 : Colors.grey,
-                    ),
-                  ),
-
-                  const SizedBox(width: 16),
-
-                  // Customer Details
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Name and Status Row
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                customer.custname,
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: isActive ? Colors.black : Colors.grey.shade600,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  customer.custname,
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isActive ? Colors.black : Colors.grey.shade600),
                                 ),
                               ),
-                            ),
-
-                            // ACTIVE/INACTIVE BUTTON
-                            if (permissionProvider.canEditCustomer())
-                              GestureDetector(
-                                onTap: () => _toggleCustomerStatus(index),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isActive
-                                        ? Colors.green.withOpacity(0.15)
-                                        : Colors.red.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: isActive ? Colors.green : Colors.red,
-                                      width: 1,
+                              if (permissionProvider.canEditCustomer())
+                                GestureDetector(
+                                  onTap: () => _toggleCustomerStatus(index),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: isActive ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: isActive ? Colors.green : Colors.red, width: 1),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(isActive ? Icons.check_circle : Icons.cancel, size: 14, color: isActive ? Colors.green : Colors.red),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          isActive ? "ACTIVE" : "INACTIVE",
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isActive ? Colors.green : Colors.red),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        isActive ? Icons.check_circle : Icons.cancel,
-                                        size: 14,
-                                        color: isActive ? Colors.green : Colors.red,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        isActive ? "ACTIVE" : "INACTIVE",
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: isActive ? Colors.green : Colors.red,
-                                        ),
-                                      ),
-                                    ],
+                                )
+                              else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isActive ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    isActive ? "ACTIVE" : "INACTIVE",
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isActive ? Colors.green : Colors.red),
                                   ),
                                 ),
-                              )
-                            else
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isActive
-                                      ? Colors.green.withOpacity(0.15)
-                                      : Colors.red.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  isActive ? "ACTIVE" : "INACTIVE",
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: isActive ? Colors.green : Colors.red,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // Customer Details from API
-                        if (customer.phone.isNotEmpty)
-                          _buildDetailItem(Icons.phone, "Phone", customer.phone),
-                        if (customer.address.isNotEmpty)
-                          _buildDetailItem(Icons.location_on, "Address", customer.address),
-                        if (customer.custTypeName.isNotEmpty)
-                          _buildDetailItem(Icons.category, "Type", customer.custTypeName),
-                        if (customer.gst.isNotEmpty)
-                          _buildDetailItem(Icons.numbers, "GST", customer.gst),
-                        _buildDetailItem(Icons.account_balance_wallet, "Balance", customer.formattedBalance),
-
-                        // Show Outstanding Amount
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.money_off,
-                                size: 16,
-                                color: amountColor,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                "Outstanding: ",
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              Text(
-                                outstanding,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: amountColor,
-                                ),
-                              ),
                             ],
                           ),
+                          const SizedBox(height: 12),
+                          if (customer.phone.isNotEmpty) _buildDetailItem(Icons.phone, "Phone", customer.phone),
+                          if (customer.address.isNotEmpty) _buildDetailItem(Icons.location_on, "Address", customer.address),
+                          if (customer.custTypeName.isNotEmpty) _buildDetailItem(Icons.category, "Type", customer.custTypeName),
+                          if (customer.gst.isNotEmpty) _buildDetailItem(Icons.numbers, "GST", customer.gst),
+                          _buildDetailItem(Icons.account_balance_wallet, "Balance", customer.formattedBalance),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: [
+                                Icon(Icons.money_off, size: 16, color: amountColor),
+                                const SizedBox(width: 8),
+                                Text("Outstanding: ", style: const TextStyle(fontSize: 14, color: Colors.black87)),
+                                Text(outstanding, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: amountColor)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      children: [
+                        _buildActionButton(
+                          icon: Icons.visibility,
+                          color: Colors.blue,
+                          onTap: () => _showCustomerDetails(customer, permissionProvider, outstanding),
+                          tooltip: 'View Details',
                         ),
-
-                        // Customer ID removed from here
+                        const SizedBox(height: 8),
+                        _buildActionButton(
+                          icon: Icons.edit,
+                          color: isActive && permissionProvider.canEditCustomer() ? Colors.orange : Colors.grey,
+                          onTap: isActive && permissionProvider.canEditCustomer()
+                              ? () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => Updatecustomer(customer: customer))).then((value) {
+                              if (value == true) {
+                                _fetchCustomers(resetPagination: true);
+                              }
+                            });
+                          }
+                              : () {
+                            final message = !isActive ? "Inactive customer cannot be edited" : "You do not have permission to edit customers";
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text(message), duration: const Duration(seconds: 2)));
+                          },
+                          tooltip: isActive ? 'Edit Customer' : 'Cannot edit inactive customer',
+                        ),
                       ],
                     ),
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  // Action Buttons (Only View and Edit)
-                  Column(
-                    children: [
-                      // View Button
-                      _buildActionButton(
-                        icon: Icons.visibility,
-                        color: Colors.blue,
-                        onTap: () => _showCustomerDetails(customer, permissionProvider, outstanding),
-                        tooltip: 'View Details',
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      // Edit Button - FIXED: Only enabled for active customers
-                      _buildActionButton(
-                        icon: Icons.edit,
-                        color: isActive && permissionProvider.canEditCustomer()
-                            ? Colors.orange
-                            : Colors.grey,
-                        onTap: isActive && permissionProvider.canEditCustomer()
-                            ? () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => Updatecustomer(customer: customer),
-                            ),
-                          ).then((value) {
-                            if (value == true) {
-                              _fetchCustomers();
-                            }
-                          });
-                        }
-                            : () {
-                          final message = !isActive
-                              ? "Inactive customer cannot be edited"
-                              : "You do not have permission to edit customers";
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: Colors.red,
-                              content: Text(message),
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                        tooltip: isActive ? 'Edit Customer' : 'Cannot edit inactive customer',
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           );
         },
       ),
+    );  }
+
+  // Load More Button
+  Widget _buildLoadMoreButton() {
+    if (!hasMorePages) {
+      return const SizedBox.shrink();
+    }
+
+    if (isLoadingMore) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        child: const Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 16),
+              Text('Loading more customers...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Center(
+        child: ElevatedButton(
+          onPressed: _loadMoreCustomers,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade800,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_downward, size: 18),
+              const SizedBox(width: 8),
+              Text('Load More (Page $currentPage of $totalPages)', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  // =================== DETAIL ITEM BUILDER ===================
+  // Detail item builder
   Widget _buildDetailItem(IconData icon, String label, String? value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -1491,25 +1205,15 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           Icon(icon, size: 16, color: Colors.grey.shade600),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              "$label: ${value ?? 'N/A'}",
-              style: const TextStyle(fontSize: 14, color: Colors.black87),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: Text("$label: ${value ?? 'N/A'}", style: const TextStyle(fontSize: 14, color: Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
           ),
         ],
       ),
     );
   }
 
-  // =================== ACTION BUTTON BUILDER ===================
-  Widget _buildActionButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-    required String tooltip,
-  }) {
+  // Action button builder
+  Widget _buildActionButton({required IconData icon, required Color color, required VoidCallback onTap, required String tooltip}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -1528,29 +1232,20 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
     );
   }
 
-  // =================== SHOW CUSTOMER DETAILS DIALOG ===================
+  // Show customer details dialog
   void _showCustomerDetails(CustomerModel customer, PermissionProvider permissionProvider, String outstanding) {
-    // Determine if outstanding amount is positive (Cr) or negative (Dr)
     final isPositive = outstanding.contains('Cr');
     final amountColor = isPositive ? Colors.red : Colors.green;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             const Icon(Icons.person, color: Colors.blue),
             const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                customer.custname,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            Expanded(child: Text(customer.custname, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
           ],
         ),
         content: SingleChildScrollView(
@@ -1558,26 +1253,17 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Customer ID removed from dialog as well
-              if (customer.phone.isNotEmpty)
-                _buildDetailRow(Icons.phone, "Phone", customer.phone),
-              if (customer.email.isNotEmpty)
-                _buildDetailRow(Icons.email, "Email", customer.email),
-              if (customer.landPhone.isNotEmpty)
-                _buildDetailRow(Icons.phone, "Land Phone", customer.landPhone),
-              if (customer.address.isNotEmpty)
-                _buildDetailRow(Icons.location_on, "Address", customer.address),
-              if (customer.custTypeName.isNotEmpty)
-                _buildDetailRow(Icons.category, "Customer Type", customer.custTypeName),
-              if (customer.gst.isNotEmpty)
-                _buildDetailRow(Icons.numbers, "GST Number", customer.gst),
+              if (customer.phone.isNotEmpty) _buildDetailRow(Icons.phone, "Phone", customer.phone),
+              if (customer.email.isNotEmpty) _buildDetailRow(Icons.email, "Email", customer.email),
+              if (customer.landPhone.isNotEmpty) _buildDetailRow(Icons.phone, "Land Phone", customer.landPhone),
+              if (customer.address.isNotEmpty) _buildDetailRow(Icons.location_on, "Address", customer.address),
+              if (customer.custTypeName.isNotEmpty) _buildDetailRow(Icons.category, "Customer Type", customer.custTypeName),
+              if (customer.gst.isNotEmpty) _buildDetailRow(Icons.numbers, "GST Number", customer.gst),
               _buildDetailRow(Icons.account_balance_wallet, "Balance", customer.formattedBalance),
               _buildDetailRow(Icons.calendar_today, "Credit Days", "${customer.creditDays} days"),
               _buildDetailRow(Icons.location_city, "State", "${customer.state} (${customer.stateCode})"),
               _buildDetailRow(Icons.account_balance, "Opening Balance", "₹${customer.opBln.toStringAsFixed(2)}"),
               _buildDetailRow(Icons.compare_arrows, "Balance Type", customer.balanceType),
-
-              // Outstanding Amount
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Row(
@@ -1589,57 +1275,29 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            "Outstanding Amount",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
+                          const Text("Outstanding Amount", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                           const SizedBox(height: 4),
-                          Text(
-                            outstanding,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: amountColor,
-                            ),
-                          ),
+                          Text(outstanding, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: amountColor)),
                         ],
                       ),
                     ),
                   ],
                 ),
               ),
-
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: customer.isActive
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.red.withOpacity(0.1),
+                  color: customer.isActive ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: customer.isActive ? Colors.green : Colors.red,
-                    width: 1,
-                  ),
+                  border: Border.all(color: customer.isActive ? Colors.green : Colors.red, width: 1),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      customer.isActive ? Icons.check_circle : Icons.cancel,
-                      color: customer.isActive ? Colors.green : Colors.red,
-                    ),
+                    Icon(customer.isActive ? Icons.check_circle : Icons.cancel, color: customer.isActive ? Colors.green : Colors.red),
                     const SizedBox(width: 8),
-                    Text(
-                      customer.isActive ? "Active" : "Inactive",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: customer.isActive ? Colors.green : Colors.red,
-                      ),
-                    ),
+                    Text(customer.isActive ? "Active" : "Inactive", style: TextStyle(fontWeight: FontWeight.bold, color: customer.isActive ? Colors.green : Colors.red)),
                   ],
                 ),
               ),
@@ -1647,34 +1305,25 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
           ),
         ),
         actions: [
-          // FIXED: Edit button only shown for active customers
           if (permissionProvider.canEditCustomer() && customer.isActive)
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => Updatecustomer(customer: customer),
-                  ),
-                ).then((value) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => Updatecustomer(customer: customer))).then((value) {
                   if (value == true) {
-                    _fetchCustomers();
+                    _fetchCustomers(resetPagination: true);
                   }
                 });
               },
               child: const Text('Edit'),
             ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
         ],
       ),
     );
   }
 
-  // =================== DETAIL ROW FOR DIALOG ===================
+  // Detail row for dialog
   Widget _buildDetailRow(IconData icon, String label, String? value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1687,18 +1336,9 @@ class _CustomerPageContentState extends State<_CustomerPageContent> with Automat
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
+                Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(
-                  value ?? 'N/A',
-                  style: const TextStyle(fontSize: 14, color: Colors.black87),
-                ),
+                Text(value ?? 'N/A', style: const TextStyle(fontSize: 14, color: Colors.black87)),
               ],
             ),
           ),

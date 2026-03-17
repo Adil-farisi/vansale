@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ReceiptUpdatePage.dart';
@@ -14,22 +15,37 @@ class ReceiptsMainPage extends StatefulWidget {
 }
 
 class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
-  List<Map<String, dynamic>> receipts = [];
+  List<Map<String, dynamic>> allReceipts = [];
+  List<Map<String, dynamic>> displayedReceipts = [];
   Map<String, String> walletMap = {}; // Map wallet IDs to names
   bool isLoading = true;
   bool isLoadingWallets = false;
+  bool isLoadingMore = false;
   bool hasError = false;
-  bool isDeleting = false; // Fixed: Added at class level
+  bool isDeleting = false;
   String errorMessage = '';
   final TextEditingController searchController = TextEditingController();
 
+  // Pagination variables
+  int currentPage = 1;
+  int totalPages = 1;
+  int totalReceipts = 0;
+  bool hasMorePages = false;
+  String searchQuery = '';
+
+  // Debounce timer for search
+  Timer? _debounceTimer;
+
+  // Scroll controller for pagination
+  final ScrollController _scrollController = ScrollController();
+
   // API URLs
   final String receiptsApiUrl =
-      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/receipts.php";
+      "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/receipts.php";
   final String walletsApiUrl =
-      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_wallets.php";
+      "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_wallets.php";
   final String receiptActionApiUrl =
-      "http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/receipt.php";
+      "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/receipt.php";
 
   // Session variables
   String unid = '';
@@ -40,6 +56,30 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
     super.initState();
     print("🚀 ReceiptsMainPage initialized");
     _loadSessionData();
+
+    // Add scroll listener for pagination
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    _debounceTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // Scroll listener for pagination
+  void _onScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients &&
+          _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+        // User scrolled near the bottom, load more data
+        if (!isLoadingMore && hasMorePages && !isLoading) {
+          _loadMoreReceipts();
+        }
+      }
+    });
   }
 
   Future<void> _loadSessionData() async {
@@ -76,16 +116,12 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
   Future<void> _fetchWalletsAndReceipts() async {
     print("🔄 Starting to fetch wallets and receipts...");
 
-    // Start loading
     setState(() {
       isLoadingWallets = true;
     });
 
-    // Fetch wallets first
     await _fetchWallets();
-
-    // Then fetch receipts
-    await _fetchReceipts();
+    await _fetchReceipts(resetPagination: true);
   }
 
   Future<void> _fetchWallets() async {
@@ -127,15 +163,12 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
         } else {
           print('❌ Wallet API returned result: ${data['result']}');
           print('❌ Wallet API message: ${data['message']}');
-          // Don't set error - continue with receipts even if wallets fail
         }
       } else {
         print('❌ Wallet API HTTP error: ${response.statusCode}');
-        // Don't set error - continue with receipts
       }
     } catch (e) {
       print('❌ Exception in _fetchWallets: $e');
-      // Don't set error - continue with receipts
     } finally {
       setState(() {
         isLoadingWallets = false;
@@ -143,23 +176,30 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
     }
   }
 
-  Future<void> _fetchReceipts() async {
+  // =================== FETCH RECEIPTS WITH SEARCH AND PAGINATION ===================
+  Future<void> _fetchReceipts({bool resetPagination = true}) async {
     print("🔄 Starting API call to: $receiptsApiUrl");
+    print("📝 Search query: '$searchQuery'");
+    print("📄 Page: $currentPage");
 
-    // Request body with session data
+    if (resetPagination) {
+      setState(() {
+        isLoading = true;
+        hasError = false;
+        currentPage = 1;
+        allReceipts = [];
+      });
+    }
+
+    // Request body with session data, search and page
     final Map<String, dynamic> requestBody = {
       "unid": unid,
       "veh": veh,
-      "srch": "",
-      "page": "",
+      "srch": searchQuery,
+      "page": currentPage.toString(),
     };
 
     print("📦 Request body: $requestBody");
-
-    setState(() {
-      isLoading = true;
-      hasError = false;
-    });
 
     try {
       print("🌐 Making HTTP POST request...");
@@ -173,14 +213,12 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
       print("📊 Status Code: ${response.statusCode}");
 
       if (response.statusCode == 200) {
-        print("✅ HTTP 200 OK");
         final responseData = json.decode(response.body);
         print("📋 Parsed Response Data: ${responseData['result']}");
         print("📋 Total Receipts from API: ${responseData['ttlreceipts']}");
 
         if (responseData['result'] == "1") {
-          // Transform API data to match our existing structure
-          final List<dynamic> receiptList = responseData['receiptdet'];
+          final List<dynamic> receiptList = responseData['receiptdet'] ?? [];
           print("✅ Success! Found ${receiptList.length} receipts");
 
           List<Map<String, dynamic>> transformedReceipts = [];
@@ -195,17 +233,11 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
             // Try to get wallet name from our wallet map
             if (walletId != null && walletMap.containsKey(walletId)) {
               walletName = walletMap[walletId]!;
-              print(
-                "💳 Using wallet name from map: $walletName (ID: $walletId)",
-              );
             }
 
-            // FIX: If walletName is "1", convert it to "Cash"
+            // If walletName is "1", convert it to "Cash"
             if (walletName == "1") {
               walletName = "Cash";
-              print(
-                "🔄 Converted wallet '1' to 'Cash' for receipt ${receipt['rcp_no']}",
-              );
             }
 
             transformedReceipts.add({
@@ -214,38 +246,56 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
               "receiptNo": receipt['rcp_no']?.toString() ?? '',
               "customerName": receipt['custname']?.toString() ?? '',
               "wallet": walletName,
-              "wltid": walletId, // Store wallet ID for reference
+              "wltid": walletId,
               "notes": receipt['notes']?.toString() ?? "",
               "receivedAmount": receipt['rcp_amt']?.toString() ?? '0',
               "rcpid": receipt['rcpid']?.toString() ?? '',
               "whatsappNo": receipt['whatsapp_no']?.toString() ?? '',
               "confirm": receipt['confirm']?.toString() ?? '',
             });
-
-            // Print first few receipts for debugging
-            if (i < 3) {
-              print(
-                "📝 Receipt ${i + 1}: ${receipt['custname']} - ${receipt['rcp_amt']} - $walletName",
-              );
-            }
           }
 
+          // Calculate pagination
+          int totalReceiptsFromApi = int.tryParse(responseData['ttlreceipts']?.toString() ?? '0') ?? 0;
+          int itemsPerPage = receiptList.length > 0 ? receiptList.length : 1;
+          int totalPagesFromApi = itemsPerPage > 0 ? (totalReceiptsFromApi / itemsPerPage).ceil() : 1;
+          bool hasMoreFromApi = currentPage < totalPagesFromApi;
+
+          print("📊 Pagination calculated:");
+          print("   - totalReceipts: $totalReceiptsFromApi");
+          print("   - itemsPerPage: $itemsPerPage");
+          print("   - totalPages: $totalPagesFromApi");
+          print("   - currentPage: $currentPage");
+          print("   - hasMore: $hasMoreFromApi");
+
           setState(() {
-            receipts = transformedReceipts;
+            if (resetPagination) {
+              allReceipts = transformedReceipts;
+            } else {
+              allReceipts.addAll(transformedReceipts);
+            }
+
+            // Apply current filter (if any) - for now just show all
+            displayedReceipts = List.from(allReceipts);
+
+            totalReceipts = totalReceiptsFromApi;
+            totalPages = totalPagesFromApi;
+            hasMorePages = hasMoreFromApi;
             isLoading = false;
+            isLoadingMore = false;
           });
 
-          print("✅ Successfully loaded ${receipts.length} receipts");
+          print("✅ Successfully loaded ${allReceipts.length} receipts");
+          print("✅ Displaying ${displayedReceipts.length} receipts");
           print("✅ Total amount: ₹${_calculateTotalAmount()}");
         } else {
           print("❌ API returned result: ${responseData['result']}");
           print("❌ Error message: ${responseData['message']}");
           setState(() {
             hasError = true;
-            errorMessage =
-                responseData['message']?.toString() ??
-                    'Failed to load receipts';
+            errorMessage = responseData['message']?.toString() ?? 'Failed to load receipts';
             isLoading = false;
+            isLoadingMore = false;
           });
         }
       } else {
@@ -254,32 +304,78 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
           hasError = true;
           errorMessage = 'HTTP Error: ${response.statusCode}';
           isLoading = false;
+          isLoadingMore = false;
         });
       }
     } catch (e) {
       print("❌❌❌ EXCEPTION CAUGHT!");
-      print("❌ Error type: ${e.runtimeType}");
       print("❌ Error message: $e");
       setState(() {
         hasError = true;
         errorMessage = 'Network Error: $e';
         isLoading = false;
+        isLoadingMore = false;
       });
     }
+  }
 
-    print(
-      "🏁 _fetchReceipts() completed. Loading: $isLoading, Error: $hasError",
-    );
+  // Load more receipts for pagination
+  Future<void> _loadMoreReceipts() async {
+    if (isLoadingMore || !hasMorePages) {
+      print('📄 Cannot load more - isLoadingMore: $isLoadingMore, hasMorePages: $hasMorePages');
+      return;
+    }
+
+    print('📄 Loading more receipts - Page ${currentPage + 1} of $totalPages');
+
+    setState(() {
+      isLoadingMore = true;
+    });
+
+    currentPage++;
+    await _fetchReceipts(resetPagination: false);
+  }
+
+  // =================== SEARCH FUNCTIONALITY ===================
+  void _searchReceipts(String query) {
+    print('🔍 Searching for: $query');
+
+    setState(() {
+      searchQuery = query;
+    });
+
+    _debounceSearch();
+  }
+
+  void _debounceSearch() {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
+
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _fetchReceipts(resetPagination: true);
+    });
+  }
+
+  void _clearSearch() {
+    print('🔍 Clearing search');
+
+    _debounceTimer?.cancel();
+
+    setState(() {
+      searchQuery = '';
+      searchController.clear();
+    });
+
+    _fetchReceipts(resetPagination: true);
+    FocusScope.of(context).unfocus();
   }
 
   // Calculate overall total amount
   String _calculateTotalAmount() {
     double total = 0;
-    for (var receipt in receipts) {
-      final amountStr = receipt["receivedAmount"].toString().replaceAll(
-        ",",
-        "",
-      );
+    for (var receipt in displayedReceipts) {
+      final amountStr = receipt["receivedAmount"].toString().replaceAll(",", "");
       final amount = double.tryParse(amountStr) ?? 0;
       total += amount;
     }
@@ -295,8 +391,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
     ).then((savedReceipt) {
       if (savedReceipt != null) {
         print("✅ New receipt saved, refreshing list...");
-        // Refresh receipts after saving
-        _fetchReceipts();
+        _fetchReceipts(resetPagination: true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Receipt saved successfully!'),
@@ -312,17 +407,22 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
   // Refresh both wallets and receipts
   Future<void> _refreshData() async {
     print("🔄 Refreshing all data...");
-    await _fetchWalletsAndReceipts();
+    setState(() {
+      currentPage = 1;
+    });
+    await _fetchWallets();
+    await _fetchReceipts(resetPagination: true);
   }
 
   @override
   Widget build(BuildContext context) {
     print("🎨 Building ReceiptsMainPage UI...");
     print("   isLoading: $isLoading");
-    print("   isLoadingWallets: $isLoadingWallets");
+    print("   isLoadingMore: $isLoadingMore");
     print("   hasError: $hasError");
-    print("   receipts count: ${receipts.length}");
-    print("   wallets count: ${walletMap.length}");
+    print("   allReceipts count: ${allReceipts.length}");
+    print("   displayedReceipts count: ${displayedReceipts.length}");
+    print("   currentPage: $currentPage, totalPages: $totalPages, hasMore: $hasMorePages");
 
     return Scaffold(
       appBar: AppBar(
@@ -411,33 +511,50 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
       );
     }
 
-    if (receipts.isEmpty) {
+    if (displayedReceipts.isEmpty) {
       print("📭 Showing empty state");
+      String emptyMessage = 'No Receipts Found';
+      if (searchQuery.isNotEmpty) {
+        emptyMessage = 'No receipts found for "$searchQuery"';
+      }
+
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.receipt_long, size: 80, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            const Text(
-              'No Receipts Found',
-              style: TextStyle(
+            Text(
+              emptyMessage,
+              style: const TextStyle(
                 fontSize: 18,
                 color: Colors.grey,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Tap the + button to add your first receipt',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+            Text(
+              searchQuery.isNotEmpty
+                  ? 'Try a different search term'
+                  : 'Tap the + button to add your first receipt',
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
+            const SizedBox(height: 20),
+            if (searchQuery.isNotEmpty)
+              ElevatedButton(
+                onPressed: _clearSearch,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey,
+                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                ),
+                child: const Text('Clear Search', style: TextStyle(color: Colors.white)),
+              ),
           ],
         ),
       );
     }
 
-    print("✅ Showing receipts list with ${receipts.length} items");
+    print("✅ Showing receipts list with ${displayedReceipts.length} items");
     return Column(
       children: [
         // Search Section
@@ -458,6 +575,13 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                     decoration: InputDecoration(
                       hintText: "Search by customer, receipt or wallet...",
                       prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: searchQuery.isNotEmpty
+                          ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: _clearSearch,
+                        padding: EdgeInsets.zero,
+                      )
+                          : null,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
                       ),
@@ -467,29 +591,8 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                       ),
                       isDense: true,
                     ),
-                    onChanged: (value) {
-                      print("🔍 Search text changed: $value");
-                      setState(() {});
-                    },
+                    onChanged: _searchReceipts,
                   ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    print("🗑️ Clear search button pressed");
-                    searchController.clear();
-                    setState(() {});
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey.shade200,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    minimumSize: Size.zero,
-                  ),
-                  child: const Text("Clear"),
                 ),
               ],
             ),
@@ -510,7 +613,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Total: ${receipts.length}",
+                        "Total: ${displayedReceipts.length} of $totalReceipts",
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
@@ -518,7 +621,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        "Customers: ${Set.from(receipts.map((r) => r["customerName"])).length}",
+                        "Customers: ${Set.from(displayedReceipts.map((r) => r["customerName"])).length}",
                         style: const TextStyle(
                           fontSize: 11,
                           color: Colors.grey,
@@ -551,38 +654,70 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
 
         const SizedBox(height: 4),
 
-        // Compact List of All Receipts
+        // Compact List of All Receipts with Pagination
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            itemCount: receipts.length,
+            itemCount: displayedReceipts.length + (hasMorePages ? 1 : 0),
             itemBuilder: (context, index) {
-              final receipt = receipts[index];
-
-              // Apply search filter
-              if (searchController.text.isNotEmpty) {
-                final search = searchController.text.toLowerCase();
-                final customerName =
-                    receipt["customerName"]?.toString().toLowerCase() ?? "";
-                final receiptNo =
-                    receipt["receiptNo"]?.toString().toLowerCase() ?? "";
-                final wallet =
-                    receipt["wallet"]?.toString().toLowerCase() ?? "";
-                final notes = receipt["notes"]?.toString().toLowerCase() ?? "";
-
-                if (!customerName.contains(search) &&
-                    !receiptNo.contains(search) &&
-                    !wallet.contains(search) &&
-                    !notes.contains(search)) {
-                  return const SizedBox();
-                }
+              // Check if this is the load more button item
+              if (index == displayedReceipts.length) {
+                return _buildLoadMoreButton();
               }
 
+              final receipt = displayedReceipts[index];
               return _receiptCard(receipt);
             },
           ),
         ),
       ],
+    );
+  }
+
+  // Load More Button for Pagination
+  Widget _buildLoadMoreButton() {
+    if (!hasMorePages) {
+      return const SizedBox.shrink();
+    }
+
+    if (isLoadingMore) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        child: const Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 16),
+              Text('Loading more receipts...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: ElevatedButton(
+          onPressed: _loadMoreReceipts,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade800,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_downward, size: 18),
+              const SizedBox(width: 8),
+              Text('Load More (Page $currentPage of $totalPages)'),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -687,14 +822,12 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color:
-                    walletDisplayName.toLowerCase() == "cash"
+                    color: walletDisplayName.toLowerCase() == "cash"
                         ? Colors.green.shade50
                         : Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
-                      color:
-                      walletDisplayName.toLowerCase() == "cash"
+                      color: walletDisplayName.toLowerCase() == "cash"
                           ? Colors.green.shade200
                           : Colors.blue.shade200,
                     ),
@@ -706,8 +839,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                             ? Icons.attach_money
                             : Icons.account_balance_wallet,
                         size: 12,
-                        color:
-                        walletDisplayName.toLowerCase() == "cash"
+                        color: walletDisplayName.toLowerCase() == "cash"
                             ? Colors.green.shade800
                             : Colors.blue.shade800,
                       ),
@@ -716,8 +848,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                         walletDisplayName,
                         style: TextStyle(
                           fontSize: 11,
-                          color:
-                          walletDisplayName.toLowerCase() == "cash"
+                          color: walletDisplayName.toLowerCase() == "cash"
                               ? Colors.green.shade800
                               : Colors.blue.shade800,
                           fontWeight: FontWeight.w500,
@@ -756,8 +887,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
   Widget _actionMenu(Map<String, dynamic> receipt) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert, size: 20, color: Colors.black),
-      itemBuilder:
-          (context) => [
+      itemBuilder: (context) => [
         const PopupMenuItem(
           value: 'view',
           child: Row(
@@ -822,18 +952,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
             ).then((updatedReceipt) {
               if (updatedReceipt != null) {
                 print("✅ Receipt updated, refreshing list...");
-                // Update the receipt in your list
-                final index = receipts.indexWhere(
-                      (r) =>
-                  r["rcpid"] == receipt["rcpid"] ||
-                      r["slNo"] == receipt["slNo"],
-                );
-                if (index != -1) {
-                  setState(() {
-                    receipts[index] = updatedReceipt;
-                  });
-                }
-
+                _fetchReceipts(resetPagination: true);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Receipt updated successfully!'),
@@ -908,22 +1027,15 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
               ),
               actions: [
                 TextButton(
-                  onPressed:
-                  isDeleting
-                      ? null
-                      : () {
+                  onPressed: isDeleting ? null : () {
                     print("   ❌ Delete cancelled");
                     Navigator.pop(context);
                   },
                   child: const Text("Cancel"),
                 ),
                 ElevatedButton(
-                  onPressed:
-                  isDeleting
-                      ? null
-                      : () async {
+                  onPressed: isDeleting ? null : () async {
                     print("   ✅ Delete confirmed");
-                    // Update both class state and dialog state
                     setState(() {
                       isDeleting = true;
                     });
@@ -934,8 +1046,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
                     await _deleteReceipt(rcpid, reason, setDialogState);
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  child:
-                  isDeleting
+                  child: isDeleting
                       ? const SizedBox(
                     width: 20,
                     height: 20,
@@ -965,7 +1076,6 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
     print("🗑️ Starting API delete request for receipt ID: $rcpid");
 
     try {
-      // Prepare API request data
       final Map<String, dynamic> requestData = {
         "unid": unid,
         "veh": veh,
@@ -978,7 +1088,6 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
       print("📤 API URL: $receiptActionApiUrl");
       print("📤 Request body: ${json.encode(requestData)}");
 
-      // Make API call
       final response = await http.post(
         Uri.parse(receiptActionApiUrl),
         headers: {'Content-Type': 'application/json'},
@@ -986,27 +1095,23 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
       );
 
       print("📥 API response status: ${response.statusCode}");
-      print("📥 API raw response: ${response.body}");
 
-      // Reset loading state and close dialog
       setState(() {
         isDeleting = false;
       });
 
-      // Always close the dialog
       Navigator.pop(context);
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
-        print("📥 API parsed response: $responseData");
 
         if (responseData['result'] == "1") {
           // Success - remove from local list
           setState(() {
-            receipts.removeWhere((receipt) => receipt["rcpid"] == rcpid);
+            allReceipts.removeWhere((receipt) => receipt["rcpid"] == rcpid);
+            displayedReceipts = List.from(allReceipts);
           });
 
-          // Show success message
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text("Receipt deleted successfully"),
@@ -1016,10 +1121,7 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
 
           print("✅ Receipt deleted successfully from server");
         } else {
-          // API returned error
-          String errorMessage =
-              responseData['message']?.toString() ?? 'Failed to delete receipt';
-          // Extract plain text from HTML message
+          String errorMessage = responseData['message']?.toString() ?? 'Failed to delete receipt';
           errorMessage = errorMessage.replaceAll(RegExp(r'<[^>]*>'), '');
           errorMessage = errorMessage
               .replaceAll('&lt;', '<')
@@ -1028,7 +1130,6 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
               .replaceAll('&quot;', '"')
               .replaceAll('&#39;', "'");
 
-          // Show error message
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text("Delete failed: $errorMessage"),
@@ -1040,7 +1141,6 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
           print("❌ Failed to delete receipt: $errorMessage");
         }
       } else {
-        // HTTP error
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("HTTP Error: ${response.statusCode}"),
@@ -1057,7 +1157,6 @@ class _ReceiptsMainPageState extends State<ReceiptsMainPage> {
         isDeleting = false;
       });
 
-      // Close dialog on error
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
       }

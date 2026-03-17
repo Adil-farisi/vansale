@@ -94,7 +94,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
       // Make API call to change password
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/change-password.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/change-password.php'),
         headers: {
           'Content-Type': 'application/json; charset=UTF-8',
         },

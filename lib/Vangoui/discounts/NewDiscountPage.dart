@@ -40,7 +40,7 @@ class _NewDiscountPageState extends State<NewDiscountPage> {
   bool isSaving = false;
 
   // API endpoint for discount actions
-  final String apiUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/discounts.php";
+  final String apiUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/discounts.php";
 
   @override
   void initState() {
@@ -77,7 +77,7 @@ class _NewDiscountPageState extends State<NewDiscountPage> {
     });
 
     try {
-      final url = Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php');
+      final url = Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customers.php');
 
       print("📤 Request URL: $url");
       print("📤 Request body: {\"unid\":\"20260117130317\",\"veh\":\"MQ--\"}");

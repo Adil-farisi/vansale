@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -15,20 +16,34 @@ class ChequesMainPage extends StatefulWidget {
 }
 
 class _ChequesMainPageState extends State<ChequesMainPage> {
-  List<Map<String, dynamic>> cheques = [];
+  List<Map<String, dynamic>> allCheques = [];
   List<Map<String, dynamic>> filteredCheques = [];
   bool isLoading = false;
+  bool isLoadingMore = false;
   String? errorMessage;
   final TextEditingController searchController = TextEditingController();
+
+  // Pagination variables
+  int currentPage = 1;
+  int totalPages = 1;
+  int totalCheques = 0;
+  bool hasMorePages = false;
+  String searchQuery = '';
+
+  // Debounce timer for search
+  Timer? _debounceTimer;
+
+  // Scroll controller for pagination
+  final ScrollController _scrollController = ScrollController();
 
   // Filter state
   String? selectedFilter; // Can be 'pending', 'cleared', 'bounced', or null for all
 
   // API Configuration
-  final String apiUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/cheques.php";
-  final String deleteApiUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/cheques.php";
-  final String bounceApiUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/cheques.php";
-  final String walletApiUrl = "http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/get_wallets.php";
+  final String apiUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/cheques.php";
+  final String deleteApiUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/cheques.php";
+  final String bounceApiUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/cheques.php";
+  final String walletApiUrl = "http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_wallets.php";
   final String unid = "20260117130317"; // You can modify this as needed
   final String veh = "MQ--"; // You can modify this as needed
 
@@ -42,23 +57,57 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
     print("📡 Wallet API URL: $walletApiUrl");
     print("📡 UNID: $unid");
     print("📡 VEH: $veh");
-    _fetchChequesFromApi();
+
+    // Add scroll listener for pagination
+    _scrollController.addListener(_onScroll);
+
+    _fetchChequesFromApi(resetPagination: true);
   }
 
-  Future<void> _fetchChequesFromApi() async {
-    print("📋 Fetching cheques from API...");
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
+  @override
+  void dispose() {
+    searchController.dispose();
+    _debounceTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // Scroll listener for pagination
+  void _onScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients &&
+          _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+        // User scrolled near the bottom, load more data
+        if (!isLoadingMore && hasMorePages && !isLoading) {
+          _loadMoreCheques();
+        }
+      }
     });
+  }
+
+  // =================== FETCH CHEQUES WITH SEARCH AND PAGINATION ===================
+  Future<void> _fetchChequesFromApi({bool resetPagination = true}) async {
+    print("📋 Fetching cheques from API...");
+    print("📝 Search query: '$searchQuery'");
+    print("📄 Page: $currentPage");
+    print("🔄 Reset pagination: $resetPagination");
+
+    if (resetPagination) {
+      setState(() {
+        isLoading = true;
+        errorMessage = null;
+        currentPage = 1;
+        allCheques = [];
+      });
+    }
 
     try {
-      // Prepare request body
+      // Prepare request body with search and page
       Map<String, dynamic> requestBody = {
         "unid": unid,
         "veh": veh,
-        "srch": searchController.text.isEmpty ? "" : searchController.text,
-        "page": "" // You can add pagination if needed
+        "srch": searchQuery,
+        "page": currentPage.toString()
       };
 
       print("📤 Request Body: ${json.encode(requestBody)}");
@@ -89,58 +138,139 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
           List<dynamic> chequeList = responseData['chequedet'] ?? [];
           print("   Cheques Count from API: ${chequeList.length}");
 
+          List<Map<String, dynamic>> newCheques = chequeList.map((item) {
+            print("📝 Processing cheque: ${item['chq_no']}");
+            return {
+              "id": item['chqid'] ?? '',
+              "customerName": item['custname'] ?? 'Unknown',
+              "chequeNo": item['chq_no'] ?? '',
+              "date": item['chq_date'] ?? '',
+              "wallet": "Bank", // Default value since API doesn't provide this
+              "walletId": "2", // Default wallet ID
+              "bankName": item['bank'] ?? '',
+              "amount": _formatAmount(item['chq_amt']),
+              "status": item['chq_status']?.toLowerCase() ?? 'pending',
+            };
+          }).toList();
+
+          // Calculate pagination
+          int totalChequesFromApi = int.tryParse(responseData['ttlcheques']?.toString() ?? '0') ?? 0;
+          int itemsPerPage = chequeList.length > 0 ? chequeList.length : 1;
+          int totalPagesFromApi = itemsPerPage > 0 ? (totalChequesFromApi / itemsPerPage).ceil() : 1;
+          bool hasMoreFromApi = currentPage < totalPagesFromApi;
+
+          print("📊 Pagination calculated:");
+          print("   - totalCheques: $totalChequesFromApi");
+          print("   - itemsPerPage: $itemsPerPage");
+          print("   - totalPages: $totalPagesFromApi");
+          print("   - currentPage: $currentPage");
+          print("   - hasMore: $hasMoreFromApi");
+
           setState(() {
-            cheques = chequeList.map((item) {
-              print("📝 Processing cheque: ${item['chq_no']}");
-              return {
-                "id": item['chqid'] ?? '',
-                "customerName": item['custname'] ?? 'Unknown',
-                "chequeNo": item['chq_no'] ?? '',
-                "date": item['chq_date'] ?? '',
-                "wallet": "Bank", // Default value since API doesn't provide this
-                "walletId": "2", // Default wallet ID
-                "bankName": item['bank'] ?? '',
-                "amount": _formatAmount(item['chq_amt']),
-                "status": item['chq_status']?.toLowerCase() ?? 'pending',
-              };
-            }).toList();
+            if (resetPagination) {
+              allCheques = newCheques;
+            } else {
+              allCheques.addAll(newCheques);
+            }
+
+            totalCheques = totalChequesFromApi;
+            totalPages = totalPagesFromApi;
+            hasMorePages = hasMoreFromApi;
 
             // Apply current filter to the new data
             _applyFilter();
 
             errorMessage = null;
-            print("✅ Successfully loaded ${cheques.length} cheques from API");
+            isLoading = false;
+            isLoadingMore = false;
+
+            print("✅ Successfully loaded ${allCheques.length} cheques from API");
+            print("✅ Displaying ${filteredCheques.length} cheques after filter");
           });
         } else {
           // API returned error
           String message = responseData['message'] ?? 'Unknown error';
           print("❌ API Error: $message");
           setState(() {
-            cheques = [];
+            allCheques = [];
             filteredCheques = [];
             errorMessage = message;
+            isLoading = false;
+            isLoadingMore = false;
           });
         }
       } else {
         print("❌ HTTP Error: ${response.statusCode}");
         setState(() {
-          cheques = [];
+          allCheques = [];
           filteredCheques = [];
           errorMessage = "Server error: ${response.statusCode}";
+          isLoading = false;
+          isLoadingMore = false;
         });
       }
     } catch (e) {
       print("❌ Exception occurred: $e");
       setState(() {
-        cheques = [];
+        allCheques = [];
         filteredCheques = [];
         errorMessage = "Network error: $e";
-      });
-    } finally {
-      setState(() {
         isLoading = false;
+        isLoadingMore = false;
       });
     }
+  }
+
+  // Load more cheques for pagination
+  Future<void> _loadMoreCheques() async {
+    if (isLoadingMore || !hasMorePages) {
+      print('📄 Cannot load more - isLoadingMore: $isLoadingMore, hasMorePages: $hasMorePages');
+      return;
+    }
+
+    print('📄 Loading more cheques - Page ${currentPage + 1} of $totalPages');
+
+    setState(() {
+      isLoadingMore = true;
+    });
+
+    currentPage++;
+    await _fetchChequesFromApi(resetPagination: false);
+  }
+
+  // =================== SEARCH FUNCTIONALITY ===================
+  void _searchCheques(String query) {
+    print('🔍 Searching for: $query');
+
+    setState(() {
+      searchQuery = query;
+    });
+
+    _debounceSearch();
+  }
+
+  void _debounceSearch() {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
+
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _fetchChequesFromApi(resetPagination: true);
+    });
+  }
+
+  void _clearSearch() {
+    print("🧹 Clearing search and filter");
+    _debounceTimer?.cancel();
+
+    setState(() {
+      searchQuery = '';
+      searchController.clear();
+      selectedFilter = null;
+    });
+
+    _fetchChequesFromApi(resetPagination: true);
+    FocusScope.of(context).unfocus();
   }
 
   String _formatAmount(String? amount) {
@@ -156,20 +286,21 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
   // Apply both search and filter to the cheques list
   void _applyFilter() {
     print("🔍 Applying filter: ${selectedFilter ?? 'All'}");
-    print("🔍 Search query: ${searchController.text}");
+    print("🔍 Search query: $searchQuery");
 
     // First filter by status if a filter is selected
     List<Map<String, dynamic>> statusFiltered = [];
 
     if (selectedFilter == null) {
-      statusFiltered = List.from(cheques);
+      statusFiltered = List.from(allCheques);
     } else {
-      statusFiltered = cheques.where((cheque) {
+      statusFiltered = allCheques.where((cheque) {
         return cheque['status'] == selectedFilter;
       }).toList();
     }
 
-    // Then apply search filter
+    // Then apply search filter (if any) - but note that API already handles search
+    // This is just for client-side filtering while waiting for API response
     if (searchController.text.isEmpty) {
       filteredCheques = statusFiltered;
     } else {
@@ -184,15 +315,6 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
 
     print("🔍 Filtered cheques count: ${filteredCheques.length}");
     setState(() {});
-  }
-
-  // Clear search and filter
-  void _clearSearch() {
-    print("🧹 Clearing search and filter");
-    searchController.clear();
-    selectedFilter = null;
-    _applyFilter();
-    FocusScope.of(context).unfocus();
   }
 
   // Show filter options
@@ -226,7 +348,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                 icon: Icons.list,
                 color: Colors.grey,
                 filterValue: null,
-                count: cheques.length,
+                count: allCheques.length,
               ),
 
               const Divider(),
@@ -237,7 +359,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                 icon: Icons.pending_actions,
                 color: Colors.blue,
                 filterValue: 'pending',
-                count: cheques.where((c) => c['status'] == 'pending').length,
+                count: allCheques.where((c) => c['status'] == 'pending').length,
               ),
 
               // Cleared Cheques Option
@@ -246,7 +368,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                 icon: Icons.check_circle,
                 color: Colors.green,
                 filterValue: 'cleared',
-                count: cheques.where((c) => c['status'] == 'cleared').length,
+                count: allCheques.where((c) => c['status'] == 'cleared').length,
               ),
 
               // Bounced Cheques Option
@@ -255,7 +377,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                 icon: Icons.cancel,
                 color: Colors.red,
                 filterValue: 'bounced',
-                count: cheques.where((c) => c['status'] == 'bounced').length,
+                count: allCheques.where((c) => c['status'] == 'bounced').length,
               ),
 
               const SizedBox(height: 20),
@@ -369,7 +491,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
   // Calculate pending amount
   String _calculatePendingAmount() {
     double total = 0;
-    for (var cheque in cheques) {
+    for (var cheque in allCheques) {
       if (cheque['status'] == 'pending') {
         final amountStr = cheque['amount']
             .toString()
@@ -382,10 +504,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
     return '₹${total.toStringAsFixed(2)}';
   }
 
-  // Mark cheque as cleared with popup dialog - UPDATED WITH WALLET API
-// Mark cheque as cleared with popup dialog - UPDATED WITH WALLET API AND CLEAR API
-// Mark cheque as cleared with popup dialog - UPDATED WITH WALLET API AND CLEAR API
-// Mark cheque as cleared with popup dialog - FIXED VERSION
+  // Mark cheque as cleared with popup dialog
   Future<void> _markAsClearedWithPopup(Map<String, dynamic> cheque) async {
     print("📝 Opening clear popup for cheque: ${cheque['chequeNo']}");
 
@@ -755,15 +874,15 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
 
                           // Update local list
                           setState(() {
-                            final index = cheques.indexWhere(
+                            final index = allCheques.indexWhere(
                                   (c) => c['id'] == cheque['id'],
                             );
                             if (index != -1) {
-                              cheques[index]['status'] = 'cleared';
-                              cheques[index]['date'] = dateController.text;
-                              cheques[index]['wallet'] = selectedWalletName;
-                              cheques[index]['walletId'] = selectedWalletId;
-                              cheques[index]['amount'] = '₹${receivedAmountController.text}';
+                              allCheques[index]['status'] = 'cleared';
+                              allCheques[index]['date'] = dateController.text;
+                              allCheques[index]['wallet'] = selectedWalletName;
+                              allCheques[index]['walletId'] = selectedWalletId;
+                              allCheques[index]['amount'] = '₹${receivedAmountController.text}';
                             }
                           });
 
@@ -849,7 +968,9 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
         );
       },
     );
-  }  void _markAsBouncedWithPopup(Map<String, dynamic> cheque) {
+  }
+
+  void _markAsBouncedWithPopup(Map<String, dynamic> cheque) {
     print("📝 Opening bounce popup for cheque: ${cheque['chequeNo']}");
 
     // Auto-generated reason text with cheque number
@@ -1014,9 +1135,9 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
 
           // Update local list
           setState(() {
-            final index = cheques.indexWhere((c) => c['id'] == chequeId);
+            final index = allCheques.indexWhere((c) => c['id'] == chequeId);
             if (index != -1) {
-              cheques[index]['status'] = 'bounced';
+              allCheques[index]['status'] = 'bounced';
             }
           });
 
@@ -1207,7 +1328,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
 
           // Remove from local list
           setState(() {
-            cheques.removeWhere((c) => c['id'] == chequeId);
+            allCheques.removeWhere((c) => c['id'] == chequeId);
           });
 
           // Re-apply filter to update the displayed list
@@ -1369,9 +1490,9 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
       // Handle the updated cheque data returned from ChequeEditPage
       if (updatedCheque != null && updatedCheque is Map<String, dynamic>) {
         setState(() {
-          final index = cheques.indexWhere((c) => c['id'] == cheque['id']);
+          final index = allCheques.indexWhere((c) => c['id'] == cheque['id']);
           if (index != -1) {
-            cheques[index] = updatedCheque;
+            allCheques[index] = updatedCheque;
           }
         });
 
@@ -1442,12 +1563,12 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
             ElevatedButton(
               onPressed: () {
                 setState(() {
-                  final index = cheques.indexWhere(
+                  final index = allCheques.indexWhere(
                         (c) => c['id'] == cheque['id'],
                   );
                   if (index != -1) {
-                    cheques[index] = {
-                      ...cheques[index],
+                    allCheques[index] = {
+                      ...allCheques[index],
                       'customerName': customerController.text,
                       'chequeNo': chequeNoController.text,
                       'date': dateController.text,
@@ -1526,9 +1647,9 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
       if (newCheque != null && newCheque is Map<String, dynamic>) {
         setState(() {
           // Add the new cheque to the beginning of the list
-          cheques.insert(0, {
+          allCheques.insert(0, {
             ...newCheque,
-            "id": (cheques.length + 1).toString(),
+            "id": (allCheques.length + 1).toString(),
             "status": "pending",
           });
         });
@@ -1549,17 +1670,22 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
   // Refresh data
   Future<void> _refreshData() async {
     print("🔄 Refreshing cheques data from API");
-    await _fetchChequesFromApi();
+    setState(() {
+      currentPage = 1;
+    });
+    await _fetchChequesFromApi(resetPagination: true);
   }
 
   @override
   Widget build(BuildContext context) {
     print("🎨 Building ChequesMainPage UI...");
-    print("   Cheques count: ${cheques.length}");
+    print("   All cheques: ${allCheques.length}");
     print("   Filtered cheques: ${filteredCheques.length}");
     print("   Selected filter: ${selectedFilter ?? 'All'}");
     print("   Is loading: $isLoading");
+    print("   Is loading more: $isLoadingMore");
     print("   Error message: $errorMessage");
+    print("   Current page: $currentPage, Total pages: $totalPages, Has more: $hasMorePages");
 
     return Scaffold(
       appBar: AppBar(
@@ -1588,7 +1714,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
   }
 
   Widget _buildBody() {
-    if (isLoading) {
+    if (isLoading && allCheques.isEmpty) {
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1601,7 +1727,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
       );
     }
 
-    if (errorMessage != null) {
+    if (errorMessage != null && allCheques.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1640,7 +1766,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
       );
     }
 
-    if (cheques.isEmpty) {
+    if (filteredCheques.isEmpty && !isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1651,19 +1777,33 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
               color: Colors.grey.shade300,
             ),
             const SizedBox(height: 16),
-            const Text(
-              'No Cheques Found',
-              style: TextStyle(
+            Text(
+              searchQuery.isNotEmpty
+                  ? 'No cheques found for "$searchQuery"'
+                  : 'No Cheques Found',
+              style: const TextStyle(
                 fontSize: 18,
                 color: Colors.grey,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Tap the + button to add your first cheque',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+            Text(
+              searchQuery.isNotEmpty
+                  ? 'Try a different search term or clear search'
+                  : 'Tap the + button to add your first cheque',
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
+            const SizedBox(height: 20),
+            if (searchQuery.isNotEmpty)
+              ElevatedButton(
+                onPressed: _clearSearch,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey,
+                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                ),
+                child: const Text('Clear Search', style: TextStyle(color: Colors.white)),
+              ),
           ],
         ),
       );
@@ -1671,7 +1811,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
 
     return Column(
       children: [
-        // Search Section with Filter Button (replaced Clear button)
+        // Search Section with Filter Button
         Card(
           margin: const EdgeInsets.all(12),
           elevation: 2,
@@ -1702,9 +1842,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                         horizontal: 12,
                       ),
                     ),
-                    onChanged: (value) {
-                      _applyFilter();
-                    },
+                    onChanged: _searchCheques,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1837,7 +1975,7 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          cheques.length.toString(),
+                          allCheques.length.toString(),
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -1930,18 +2068,70 @@ class _ChequesMainPageState extends State<ChequesMainPage> {
           ),
         ),
 
-        // Cheques List
+        // Cheques List with Pagination
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            itemCount: filteredCheques.length,
+            itemCount: filteredCheques.length + (hasMorePages ? 1 : 0),
             itemBuilder: (context, index) {
+              // Check if this is the load more button item
+              if (index == filteredCheques.length) {
+                return _buildLoadMoreButton();
+              }
+
               final cheque = filteredCheques[index];
               return _chequeCard(cheque);
             },
           ),
         ),
       ],
+    );
+  }
+
+  // Load More Button for Pagination
+  Widget _buildLoadMoreButton() {
+    if (!hasMorePages) {
+      return const SizedBox.shrink();
+    }
+
+    if (isLoadingMore) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        child: const Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 16),
+              Text('Loading more cheques...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: ElevatedButton(
+          onPressed: _loadMoreCheques,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade800,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_downward, size: 18),
+              const SizedBox(width: 8),
+              Text('Load More (Page $currentPage of $totalPages)'),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

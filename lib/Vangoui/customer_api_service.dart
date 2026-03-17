@@ -5,7 +5,7 @@ import 'customer_model.dart';
 
 class CustomerApiService {
   static const String baseUrl =
-      'http://192.168.1.108/gst-3-3-production/mobile-service/vansales';
+      'http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales';
 
   // Don't store unid and vehicle in constructor - fetch from SharedPreferences when needed
   CustomerApiService();
@@ -32,7 +32,7 @@ class CustomerApiService {
 
   Future<Map<String, dynamic>> fetchCustomers({
     String search = '',
-    String page = '',
+    String page = '1', // Default to page 1
   }) async {
     try {
       // Get session data first
@@ -52,7 +52,7 @@ class CustomerApiService {
           'unid': unid,
           'veh': veh,
           'srch': search,
-          'page': page,
+          'page': page, // Pass the page parameter
         }),
       );
 
@@ -75,12 +75,36 @@ class CustomerApiService {
                     .toList();
           }
 
+          // Get total customers count
+          int totalCustomers = 0;
+          if (data['ttlcustomers'] != null) {
+            totalCustomers = int.tryParse(data['ttlcustomers'].toString()) ?? 0;
+          }
+
+          // Calculate pagination info
+          int currentPage = int.tryParse(page) ?? 1;
+          int itemsPerPage = customers.length; // This will be 2 in your case
+          int totalPages = itemsPerPage > 0
+              ? (totalCustomers / itemsPerPage).ceil()
+              : 1;
+          bool hasMore = currentPage < totalPages;
+
+          print('📊 API DEBUG: Pagination calculated:');
+          print('📊 API DEBUG: - totalCustomers: $totalCustomers');
+          print('📊 API DEBUG: - itemsPerPage: $itemsPerPage');
+          print('📊 API DEBUG: - currentPage: $currentPage');
+          print('📊 API DEBUG: - totalPages: $totalPages');
+          print('📊 API DEBUG: - hasMore: $hasMore');
+
           return {
             'success': true,
             'message': data['message'] ?? '',
-            'totalCustomers':
-                int.tryParse(data['ttlcustomers']?.toString() ?? '0') ?? 0,
+            'totalCustomers': totalCustomers,
             'customers': customers,
+            'currentPage': currentPage,
+            'totalPages': totalPages,
+            'hasMore': hasMore,
+            'itemsPerPage': itemsPerPage,
           };
         } else {
           print('❌ API DEBUG: API returned result != 1');
@@ -89,6 +113,10 @@ class CustomerApiService {
             'message': data['message'] ?? 'Failed to fetch customers',
             'totalCustomers': 0,
             'customers': [],
+            'currentPage': 1,
+            'totalPages': 1,
+            'hasMore': false,
+            'itemsPerPage': 0,
           };
         }
       } else {
@@ -98,6 +126,10 @@ class CustomerApiService {
           'message': 'Server error: ${response.statusCode}',
           'totalCustomers': 0,
           'customers': [],
+          'currentPage': 1,
+          'totalPages': 1,
+          'hasMore': false,
+          'itemsPerPage': 0,
         };
       }
     } catch (e) {
@@ -107,6 +139,10 @@ class CustomerApiService {
         'message': e.toString(),
         'totalCustomers': 0,
         'customers': [],
+        'currentPage': 1,
+        'totalPages': 1,
+        'hasMore': false,
+        'itemsPerPage': 0,
       };
     }
   }
@@ -180,7 +216,7 @@ class CustomerApiService {
         return {
           'success': data['result'] == '1',
           'message':
-              data['message'] ??
+          data['message'] ??
               (data['result'] == '1'
                   ? 'Customer updated successfully'
                   : 'Update failed'),
@@ -268,7 +304,7 @@ class CustomerApiService {
         return {
           'success': data['result'] == '1',
           'message':
-              data['message'] ??
+          data['message'] ??
               (data['result'] == '1'
                   ? 'Customer added successfully'
                   : 'Add failed'),
@@ -313,14 +349,14 @@ class CustomerApiService {
 
         if (data['result'] == '1' && data['customertypesdet'] is List) {
           final List<Map<String, dynamic>> types =
-              (data['customertypesdet'] as List)
-                  .map(
-                    (item) => {
-                      'id': item['custtypeid'].toString(),
-                      'name': item['custtype_name'].toString(),
-                    },
-                  )
-                  .toList();
+          (data['customertypesdet'] as List)
+              .map(
+                (item) => {
+              'id': item['custtypeid'].toString(),
+              'name': item['custtype_name'].toString(),
+            },
+          )
+              .toList();
 
           print('✅ API DEBUG: Found ${types.length} customer types');
           return types;
@@ -364,15 +400,15 @@ class CustomerApiService {
 
         if (data['result'] == '1' && data['salesexedet'] is List) {
           final List<Map<String, dynamic>> executives =
-              (data['salesexedet'] as List)
-                  .map(
-                    (item) => {
-                      'id': item['slex'].toString(),
-                      'name': item['executive_name'].toString(),
-                      'phone': item['phone'].toString(),
-                    },
-                  )
-                  .toList();
+          (data['salesexedet'] as List)
+              .map(
+                (item) => {
+              'id': item['slex'].toString(),
+              'name': item['executive_name'].toString(),
+              'phone': item['phone'].toString(),
+            },
+          )
+              .toList();
 
           print('✅ API DEBUG: Found ${executives.length} sales executives');
           return executives;
@@ -472,14 +508,14 @@ class CustomerApiService {
 
         if (data['result'] == '1' && data['routedet'] is List) {
           final List<Map<String, dynamic>> routes =
-              (data['routedet'] as List)
-                  .map(
-                    (item) => {
-                      'id': item['rtid'].toString(),
-                      'name': item['route_name'].toString(),
-                    },
-                  )
-                  .toList();
+          (data['routedet'] as List)
+              .map(
+                (item) => {
+              'id': item['rtid'].toString(),
+              'name': item['route_name'].toString(),
+            },
+          )
+              .toList();
 
           print('✅ API DEBUG: Found ${routes.length} routes');
           return routes;
@@ -497,8 +533,6 @@ class CustomerApiService {
     }
   }
 
-  // =================== DELETE/DEACTIVATE CUSTOMER METHOD ===================
-  // =================== UPDATE CUSTOMER STATUS METHOD ===================
   // =================== UPDATE CUSTOMER STATUS METHOD ===================
   Future<Map<String, dynamic>> updateCustomerStatus({
     required String custId,
@@ -512,11 +546,11 @@ class CustomerApiService {
 
       print('🔄 API DEBUG: Making status update request for customer: $custId to ${isActive ? 'active' : 'inactive'}');
 
-      // FIXED: Use correct action based on what your API expects
+      // Try with 'updatestatus' action
       final requestBody = {
         'unid': unid,
         'veh': veh,
-        'action': 'updatestatus', // Try this action name
+        'action': 'updatestatus',
         'custid': custId,
         'status': isActive ? 'active' : 'inactive',
       };
@@ -536,48 +570,12 @@ class CustomerApiService {
         final Map<String, dynamic> data = json.decode(response.body);
         print('🔄 API DEBUG: Parsed status update response: $data');
 
-        // Check if update was successful
-        if (data['result'] == '1') {
-          return {
-            'success': true,
-            'message': data['message'] ?? 'Status updated successfully',
-          };
-        } else {
-          // Try alternative action name if first attempt failed
-          print('🔄 API DEBUG: First attempt failed, trying alternative action...');
-
-          // Try with 'customerstatus' action
-          final altRequestBody = {
-            'unid': unid,
-            'veh': veh,
-            'action': 'customerstatus',
-            'custid': custId,
-            'status': isActive ? 'active' : 'inactive',
-          };
-
-          final altResponse = await http.post(
-            Uri.parse('$baseUrl/action/customers.php'),
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode(altRequestBody),
-          );
-
-          if (altResponse.statusCode == 200) {
-            final Map<String, dynamic> altData = json.decode(altResponse.body);
-            print('🔄 API DEBUG: Alternative response: $altData');
-
-            return {
-              'success': altData['result'] == '1',
-              'message': altData['message'] ?? (altData['result'] == '1'
-                  ? 'Status updated successfully'
-                  : 'Status update failed'),
-            };
-          }
-
-          return {
-            'success': false,
-            'message': data['message'] ?? 'Status update failed',
-          };
-        }
+        return {
+          'success': data['result'] == '1',
+          'message': data['message'] ?? (data['result'] == '1'
+              ? 'Status updated successfully'
+              : 'Status update failed'),
+        };
       } else {
         print('❌ API DEBUG: HTTP Error ${response.statusCode}');
         return {

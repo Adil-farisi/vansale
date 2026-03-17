@@ -41,8 +41,8 @@ class _NewChequePageState extends State<NewChequePage> {
   String _errorMessage = '';
 
   // API endpoints
-  final String _fetchCustomersUrl = 'http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php';
-  final String _saveChequeUrl = 'http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/cheques.php';
+  final String _fetchCustomersUrl = 'http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customers.php';
+  final String _saveChequeUrl = 'http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/cheques.php';
 
   // Session data
   final String unid = "20260117130317";

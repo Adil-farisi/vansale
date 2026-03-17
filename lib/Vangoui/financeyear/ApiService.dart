@@ -4,8 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../financeyear/financial_year.dart';
 
 class ApiService {
-  static const String baseUrl = "http://192.168.1.108:80";
+  static const String baseUrl = "http://192.168.1.108:7575";
   static const String financialYearEndpoint = "/gst-3-3-production/mobile-service/vansales/get_financial_year.php";
+  static const String updateFinancialYearEndpoint = "/gst-3-3-production/mobile-service/vansales/action/financial-year.php";
 
   // Fetch financial years from API
   static Future<List<FinancialYear>> fetchFinancialYears(String unid, String veh) async {
@@ -42,7 +43,6 @@ class ApiService {
       );
 
       print('📥 Response Status Code: ${response.statusCode}');
-      print('📥 Response Headers: ${response.headers}');
       print('📥 Response Body:');
       print('┌──────────────────────────────────────────');
       print('│ ${response.body.replaceAll('\n', '\n│ ')}');
@@ -66,8 +66,7 @@ class ApiService {
             var year = yearsData[i];
             print('├─ Year ${i + 1}:');
             print('│  ├─ finid: ${year['finid']}');
-            print('│  ├─ financial_year: ${year['financial_year']}');
-            if (i < yearsData.length - 1) print('│  └─');
+            print('│  └─ financial_year: ${year['financial_year']}');
           }
 
           // Convert API response to FinancialYear objects
@@ -96,6 +95,79 @@ class ApiService {
       print('❌ Exception caught: $e');
       print('🔴 ===== FINANCIAL YEARS FETCH FAILED =====\n');
       throw Exception('Failed to connect to server: $e');
+    }
+  }
+
+  // Update financial year on server
+  static Future<bool> updateFinancialYear(String unid, String veh, String finid) async {
+    print('\n🟢 ===== UPDATING FINANCIAL YEAR ON SERVER =====');
+    print('📤 Request URL: $baseUrl$updateFinancialYearEndpoint');
+
+    try {
+      final url = Uri.parse('$baseUrl$updateFinancialYearEndpoint');
+
+      // Prepare request body
+      final Map<String, String> requestBody = {
+        'unid': unid,
+        'veh': veh,
+        'finid': finid,
+      };
+
+      print('📦 Request Body:');
+      print(json.encode(requestBody));
+
+      // Make POST request
+      print('⏳ Sending update request...');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          print('❌ Update request timeout after 30 seconds');
+          throw Exception('Connection timeout. Please check your network.');
+        },
+      );
+
+      print('📥 Response Status Code: ${response.statusCode}');
+      print('📥 Response Body:');
+      print('┌──────────────────────────────────────────');
+      print('│ ${response.body.replaceAll('\n', '\n│ ')}');
+      print('└──────────────────────────────────────────');
+
+      if (response.statusCode == 200) {
+        // Parse JSON response
+        final Map<String, dynamic> responseData = jsonDecode(response.body);
+
+        print('\n🔍 Parsed Update Response:');
+        print('├─ result: "${responseData['result']}"');
+        print('└─ message: "${responseData['message']}"');
+
+        // Check if update was successful (1 means success)
+        if (responseData['result'] == "1") {
+          print('✅ Financial year update successful!');
+          print('📝 Server message: ${responseData['message']}');
+          print('🟢 ===== UPDATE COMPLETED SUCCESSFULLY =====\n');
+          return true;
+        } else {
+          print('❌ Update failed: ${responseData['message']}');
+          print('🟢 ===== UPDATE FAILED =====\n');
+          return false;
+        }
+      } else {
+        print('❌ HTTP Error: ${response.statusCode}');
+        print('❌ Response body: ${response.body}');
+        print('🟢 ===== UPDATE FAILED =====\n');
+        return false;
+      }
+    } catch (e) {
+      print('❌ Exception caught during update: $e');
+      print('🟢 ===== UPDATE FAILED WITH EXCEPTION =====\n');
+      return false;
     }
   }
 

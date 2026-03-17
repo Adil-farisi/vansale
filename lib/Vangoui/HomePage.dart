@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:van_go/Vangoui/expenses/ExpenseVoucherMainPage.dart';
 import 'package:van_go/Vangoui/invoice/InvoiceCustomerPage.dart';
+import 'package:van_go/Vangoui/payment/PaymentMainPage.dart';
 import 'package:van_go/Vangoui/receipt/ReceiptsMainPage.dart';
 import 'package:van_go/Vangoui/reports/ReportsMainPage.dart';
 import 'package:van_go/Vangoui/settings/ChangePasswordPage.dart';
@@ -10,6 +11,7 @@ import 'package:van_go/Vangoui/stocks/BatchWiseStockPage.dart';
 import 'package:van_go/Vangoui/stocks/FinishedGoodsPage.dart';
 import 'package:van_go/Vangoui/stocks/StockMainPage.dart';
 import 'package:van_go/Vangoui/stocks/TradingItemsPage.dart';
+import 'package:van_go/Vangoui/supplier/SupplierPage.dart';
 
 import 'Login.dart';
 import 'InvoiceListPage.dart';
@@ -194,6 +196,91 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     const SizedBox(height: 10),
 
+                    // ================= NEW: REGISTER SECTION =================
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4, bottom: 4),
+                      child: Text(
+                        "Register",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    ),
+
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Theme(
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          key: ValueKey(expandedSection == "register"),
+                          initiallyExpanded: expandedSection == "register",
+                          onExpansionChanged: (expanded) {
+                            setState(() {
+                              expandedSection = expanded ? "register" : null;
+                            });
+                          },
+                          leading: const Icon(Icons.app_registration),
+                          title: const Text("Register"),
+                          childrenPadding: const EdgeInsets.only(
+                            left: 16,
+                            right: 10,
+                            bottom: 10,
+                          ),
+                          children: [
+                            // Supplier Option
+                            ListTile(
+                              leading: const Icon(Icons.person_outline),
+                              title: const Text("Supplier"),
+                              onTap: () async {
+                                Navigator.pop(context);
+                                // Navigate to SupplierPage
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const SupplierPage(),
+                                  ),
+                                );
+                                openDrawerCollapsed();
+                              },
+                            ),
+
+                            // Customer Option
+                            ListTile(
+                              leading: const Icon(Icons.people_outline),
+                              title: const Text("Customer"),
+                              onTap: () async {
+                                Navigator.pop(context);
+                                // Navigate to CustomerPage
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const CustomerPage(),
+                                  ),
+                                );
+                                openDrawerCollapsed();
+                              },
+                            ),
+
+                            // You can add more register options here later
+                            // ListTile(
+                            //   leading: const Icon(Icons.business_outlined),
+                            //   title: const Text("Company"),
+                            //   onTap: () {
+                            //     // Navigate to Company page
+                            //   },
+                            // ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 15),
+
                     // ================= TRANSACTIONS =================
                     // Only show if user has any transaction permissions
                     if (permissionProvider.canAddReceipt())
@@ -219,12 +306,10 @@ class _HomePageState extends State<HomePage> {
                           ).copyWith(dividerColor: Colors.transparent),
                           child: ExpansionTile(
                             key: ValueKey(expandedSection == "transactions"),
-                            initiallyExpanded:
-                                expandedSection == "transactions",
+                            initiallyExpanded: expandedSection == "transactions",
                             onExpansionChanged: (expanded) {
                               setState(() {
-                                expandedSection =
-                                    expanded ? "transactions" : null;
+                                expandedSection = expanded ? "transactions" : null;
                               });
                             },
                             leading: const Icon(Icons.receipt_long_outlined),
@@ -235,6 +320,7 @@ class _HomePageState extends State<HomePage> {
                               bottom: 10,
                             ),
                             children: [
+                              // Receipts Option
                               ListTile(
                                 leading: const Icon(Icons.receipt),
                                 title: const Text("Receipts"),
@@ -249,11 +335,10 @@ class _HomePageState extends State<HomePage> {
                                   openDrawerCollapsed();
                                 },
                               ),
-                              // ADDED CHEQUES OPTION
+
+                              // Cheques Option
                               ListTile(
-                                leading: const Icon(
-                                  Icons.account_balance_wallet,
-                                ),
+                                leading: const Icon(Icons.account_balance_wallet),
                                 title: const Text("Cheques"),
                                 onTap: () async {
                                   Navigator.pop(context);
@@ -266,7 +351,8 @@ class _HomePageState extends State<HomePage> {
                                   openDrawerCollapsed();
                                 },
                               ),
-                              // ADDED DISCOUNTS OPTION
+
+                              // Discounts Option
                               ListTile(
                                 leading: const Icon(Icons.discount),
                                 title: const Text("Discounts"),
@@ -281,11 +367,26 @@ class _HomePageState extends State<HomePage> {
                                   openDrawerCollapsed();
                                 },
                               ),
+
+                              // Payment Option (NEW)
+                              ListTile(
+                                leading: const Icon(Icons.payment),
+                                title: const Text("Payment"),
+                                onTap: () async {
+                                  Navigator.pop(context);
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const PaymentMainPage(),
+                                    ),
+                                  );
+                                  openDrawerCollapsed();
+                                },
+                              ),
                             ],
                           ),
                         ),
                       ),
-
                     const SizedBox(height: 15),
 
                     // ================= SALES =================
@@ -445,12 +546,8 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
 
+                    const SizedBox(height: 15),
 
-
-
-
-
-                    const SizedBox(height: 15), // ADDED SPACING
                     // ================= SETTINGS =================
                     // Settings section - Always show to all users
                     const Padding(
@@ -644,159 +741,131 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-
       // =================== BODY ===================
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // CUSTOMERS CARD - Only show if user has customer view permission
-            if (permissionProvider.canViewCustomer())
-              GestureDetector(
-                onTap: () {
-                  if (permissionProvider.canViewCustomer()) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const CustomerPage()),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'You do not have permission to view customers',
-                        ),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                child: Card(
-                  elevation: 5,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    width: double.infinity,
-                    child: Row(
-                      children: const [
-                        Icon(Icons.person, size: 40, color: Colors.blue),
-                        SizedBox(width: 20),
-                        Text(
-                          "Customers",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+            // REPORTS AND STOCK CARDS IN ONE ROW
+            if (permissionProvider.canViewSalesReport() ||
+                permissionProvider.canViewStock())
+              Row(
+                children: [
+                  // REPORTS CARD - Only show if user has report permissions
+                  if (permissionProvider.canViewSalesReport())
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          if (permissionProvider.canViewSalesReport()) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ReportsMainPage(),
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'You do not have permission to view reports',
+                                ),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        child: Card(
+                          elevation: 5,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.all(20),
+                            width: double.infinity,
+                            child: Column(
+                              children: const [
+                                Icon(
+                                  Icons.bar_chart,
+                                  size: 40,
+                                  color: Colors.green,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  "Reports",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ),
 
-            if (permissionProvider.canViewCustomer())
-              const SizedBox(height: 14),
+                  if (permissionProvider.canViewSalesReport() &&
+                      permissionProvider.canViewStock())
+                    const SizedBox(width: 14),
 
-            // REPORTS CARD - Only show if user has report permissions
-            if (permissionProvider.canViewSalesReport())
-              GestureDetector(
-                onTap: () {
-                  if (permissionProvider.canViewSalesReport()) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ReportsMainPage(),
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'You do not have permission to view reports',
-                        ),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                child: Card(
-                  elevation: 5,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    width: double.infinity,
-                    child: Row(
-                      children: const [
-                        Icon(Icons.bar_chart, size: 40, color: Colors.green),
-                        SizedBox(width: 20),
-                        Text(
-                          "Reports",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                  // STOCK CARD - Only show if user has stock view permission
+                  if (permissionProvider.canViewStock())
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          if (permissionProvider.canViewStock()) {
+                            // Navigate to Stock Main Page
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const StockMainPage(),
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'You do not have permission to view stock',
+                                ),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        child: Card(
+                          elevation: 5,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.all(20),
+                            width: double.infinity,
+                            child: Column(
+                              children: const [
+                                Icon(
+                                  Icons.inventory,
+                                  size: 40,
+                                  color: Colors.orange,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  "Stock",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-            if (permissionProvider.canViewSalesReport())
-              const SizedBox(height: 14),
-
-            // STOCK CARD - Only show if user has stock view permission
-            if (permissionProvider.canViewStock())
-              GestureDetector(
-                onTap: () {
-                  if (permissionProvider.canViewStock()) {
-                    // Navigate to Stock Main Page (you'll need to create this)
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const StockMainPage()),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'You do not have permission to view stock',
-                        ),
-                        backgroundColor: Colors.red,
                       ),
-                    );
-                  }
-                },
-                child: Card(
-                  elevation: 5,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    width: double.infinity,
-                    child: Row(
-                      children: const [
-                        Icon(Icons.inventory, size: 40, color: Colors.orange),
-                        SizedBox(width: 20),
-                        Text(
-                          "Stock",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
                     ),
-                  ),
-                ),
+                ],
               ),
 
             // Show message if no cards are visible
-            if (!permissionProvider.canViewCustomer() &&
-                !permissionProvider.canViewSalesReport() &&
+            if (!permissionProvider.canViewSalesReport() &&
                 !permissionProvider.canViewStock())
               Expanded(
                 child: Center(
@@ -851,7 +920,6 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-
       // FLOATING ACTION BUTTON for New Billing (if user has permission)
       floatingActionButton:
           permissionProvider.canCreateNewBill()

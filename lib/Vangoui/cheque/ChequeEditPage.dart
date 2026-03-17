@@ -44,8 +44,8 @@ class _ChequeEditPageState extends State<ChequeEditPage> {
   FocusNode _customerFocusNode = FocusNode();
 
   // API endpoint
-  final String _apiUrl = 'http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customers.php';
-  final String _updateChequeUrl = 'http://192.168.1.108:80/gst-3-3-production/mobile-service/vansales/action/cheques.php';
+  final String _apiUrl = 'http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customers.php';
+  final String _updateChequeUrl = 'http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/cheques.php';
 
   // Session data
   final String unid = "20260117130317";

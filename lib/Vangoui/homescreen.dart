@@ -394,28 +394,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             trailing: isSelected
                                 ? const Icon(Icons.radio_button_checked, color: Colors.green)
                                 : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+                            // In _showFinancialYearDialog method, find the onTap for ListTile
                             onTap: () async {
-                              // Update selected year
+                              // Update selected year locally
                               setState(() {
                                 _selectedFinancialYear = year;
                               });
 
-                              // Save to SharedPreferences
-                              await FinancialYearService.saveSelectedYear(year);
+                              // Save to SharedPreferences AND update server
+                              final serverSuccess = await FinancialYearService.saveSelectedYear(year);
 
                               if (context.mounted) {
                                 Navigator.pop(context);
 
-                                // Show snackbar for confirmation
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Financial year changed to ${year.displayName}',
+                                // Show appropriate snackbar based on server update result
+                                if (serverSuccess) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Financial year changed to ${year.displayName}',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
                                     ),
-                                    duration: const Duration(seconds: 2),
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Year changed to ${year.displayName} (Offline mode)',
+                                      ),
+                                      backgroundColor: Colors.orange,
+                                      duration: const Duration(seconds: 3),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
                               }
                             },
                           ),

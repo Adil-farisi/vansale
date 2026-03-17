@@ -61,7 +61,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_customer_types.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_customer_types.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -121,7 +121,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_sales_executives.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_sales_executives.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -195,7 +195,7 @@ class _AddcustomerState extends State<Addcustomer> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.108/gst-3-3-production/mobile-service/vansales/get_routes.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/get_routes.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -311,12 +311,12 @@ class _AddcustomerState extends State<Addcustomer> {
       };
 
       print('========== CUSTOMER INSERT API CALL ==========');
-      print('URL: http://192.168.1.108/gst-3-3-production/mobile-service/vansales/action/customers.php');
+      print('URL: http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/customers.php');
       print('Request Body: ${json.encode(requestBody)}');
 
       // Make API call
       final response = await http.post(
-        Uri.parse('http://192.168.20.103/gst-3-3-production/mobile-service/vansales/action/customers.php'),
+        Uri.parse('http://192.168.1.108:7575/gst-3-3-production/mobile-service/vansales/action/customers.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -531,7 +531,7 @@ class _AddcustomerState extends State<Addcustomer> {
                   label: "Land Phone",
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  validator: null,
+                  validator: _landPhoneValidator,
                 ),
 
                 const SizedBox(height: 16),
@@ -1349,6 +1349,40 @@ class _AddcustomerState extends State<Addcustomer> {
       v == null || v.length != 10
           ? "Enter 10 digit phone"
           : null;
+
+
+  String? _landPhoneValidator(String? value) {
+    if (value == null || value.isEmpty) {
+      return null; // Land phone is optional
+    }
+
+    // Remove spaces and hyphens for validation
+    String cleaned = value.replaceAll(RegExp(r'[\s\-\(\)]'), '');
+
+    // Allow plus sign only at the beginning (for country code)
+    if (cleaned.startsWith('+')) {
+      cleaned = cleaned.substring(1); // Remove + for digit check
+      if (!RegExp(r'^[0-9]+$').hasMatch(cleaned)) {
+        return 'Invalid format. Use numbers and optional + at start';
+      }
+    } else {
+      // Check if contains only digits
+      if (!RegExp(r'^[0-9]+$').hasMatch(cleaned)) {
+        return 'Enter numbers only';
+      }
+    }
+
+    // Check length (including STD code, landline numbers are usually 8-15 digits)
+    if (cleaned.length < 8) {
+      return 'Land phone should have at least 8 digits';
+    }
+
+    if (cleaned.length > 15) {
+      return 'Land phone is too long (max 15 digits)';
+    }
+
+    return null; // Valid
+  }
 
   // ================= SUBMIT =================
 
